@@ -77,10 +77,7 @@ export default function Home() {
   const matches = useMemo(() => matchExperiences(jd, experiences), [jd, experiences]);
   const hrReview = useMemo(() => reviewCandidateProfile(profile, experiences), [profile, experiences]);
   const readiness = useMemo(() => getExperienceReadiness(draft), [draft]);
-  const currentQuestion = useMemo(
-    () => getNextInterviewQuestion(draft, skippedGoals),
-    [draft, skippedGoals],
-  );
+  const currentQuestion = useMemo(() => getNextInterviewQuestion(draft, skippedGoals), [draft, skippedGoals]);
 
   const selectedExperiences = useMemo(() => {
     const rankedIds = matches.filter((match) => match.score > 0).slice(0, 3).map((match) => match.experienceId);
@@ -116,9 +113,9 @@ export default function Home() {
     setExperiences((current) => current.filter((item) => item.id !== id));
   }
 
-  function submitInterviewAnswer(value?: string) {
+  function submitInterviewAnswer() {
     if (!currentQuestion) return;
-    const answer = (value ?? interviewAnswer).trim();
+    const answer = interviewAnswer.trim();
     if (!answer) return;
 
     if (uncertainAnswers.some((item) => answer.includes(item))) {
@@ -131,6 +128,17 @@ export default function Home() {
     setDraft((current) => applyInterviewAnswer(current, currentQuestion, answer));
     setCoachNote("已记录为事实。下一问会根据你刚才的回答重新判断，不按固定题库机械提问。 ");
     setInterviewAnswer("");
+  }
+
+  function chooseQuickOption(option: string) {
+    if (uncertainAnswers.some((item) => option.includes(item))) {
+      if (!currentQuestion) return;
+      setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
+      setCoachNote("这项没有可靠信息就不写。我会继续问下一项。 ");
+      setInterviewAnswer("");
+      return;
+    }
+    setInterviewAnswer((current) => current.trim() ? `${current}；${option}` : option);
   }
 
   function skipCurrentQuestion(reason: "skip" | "unknown") {
@@ -237,12 +245,12 @@ export default function Home() {
                       <h3>{currentQuestion.question}</h3>
                       {currentQuestion.options.length > 0 && (
                         <div className="quickOptions">
-                          {currentQuestion.options.map((option) => <button key={option} onClick={() => submitInterviewAnswer(option)}>{option}</button>)}
+                          {currentQuestion.options.map((option) => <button key={option} onClick={() => chooseQuickOption(option)}>{option}</button>)}
                         </div>
                       )}
                       <textarea rows={3} value={interviewAnswer} onChange={(e) => setInterviewAnswer(e.target.value)} placeholder={currentQuestion.placeholder} />
                       <div className="coachActions">
-                        <button className="primary" disabled={!interviewAnswer.trim()} onClick={() => submitInterviewAnswer()}>回答并继续 →</button>
+                        <button className="primary" disabled={!interviewAnswer.trim()} onClick={submitInterviewAnswer}>回答并继续 →</button>
                         <button className="ghost" onClick={() => skipCurrentQuestion("unknown")}>记不清</button>
                         <button className="ghost" onClick={() => skipCurrentQuestion("skip")}>跳过</button>
                       </div>
