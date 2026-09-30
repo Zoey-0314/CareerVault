@@ -2,120 +2,168 @@
 
 ## Goal
 
-V1 proves one complete loop:
+CareerVault V1 is a low-friction career memory and resume tailoring workspace. It deliberately focuses on six capabilities only:
 
-`Profile -> Experience -> Follow-up -> JD -> Match -> One-page Resume`
+1. Personal profile
+2. Experience library
+3. AI-style guided experience enrichment
+4. Paste a job description
+5. Job-to-experience matching
+6. One-page resume generation
 
-The architecture intentionally stays small so the product can be tested before adding authentication, databases, multiple AI providers, job tracking, or document export.
+## Product boundary
 
-## Current stack
+V1 does not include authentication, a remote database, auto-apply, job tracking, cover letters, interview simulation, multiple resume templates, or PDF export.
 
-- Next.js App Router
-- React
-- TypeScript
-- plain CSS
-- browser localStorage for V1 demo persistence
+The prototype stores data locally in the browser so the core workflow can be validated before backend complexity is introduced.
 
-No backend database is required for the first interactive prototype.
+## Core design principle: facts and wording are separate
 
-## Current modules
+CareerVault treats user-provided experience facts as the source of truth.
 
-### `src/lib/types.ts`
+The system may:
 
-Canonical V1 data structures.
+- choose which verified facts are relevant to a target role;
+- reorder facts;
+- rewrite wording;
+- shorten or combine facts for a one-page resume.
 
-The `Experience` record is the most important object. It separates original user input, structured fields, and verified facts.
+The system must not:
 
-### `src/lib/matching.ts`
+- invent metrics;
+- upgrade participation into ownership;
+- invent tools or technologies;
+- invent outcomes;
+- convert approximate data into false precision;
+- write unsupported soft-skill claims.
 
-Contains:
+## V1 data flow
 
-- transparent JD keyword extraction;
-- experience ranking;
-- deterministic follow-up-question generation.
+```text
+Personal profile
+      ↓
+Experience intake
+      ↓
+Adaptive HR interview
+      ↓
+Structured facts
+      ↓
+Experience library
+      ↓
+Paste JD
+      ↓
+Transparent matching
+      ↓
+Select strongest evidence
+      ↓
+One-page resume
+```
 
-This module is deliberately replaceable. Later AI semantic matching should preserve the same input/output contract.
+## Adaptive HR interview
 
-### `src/lib/resume.ts`
+The interview is not a static questionnaire and does not expose STAR fields to the user.
 
-Transforms selected verified experience data into resume-ready text.
+A user can start with a sentence such as:
 
-This is an expression layer, not a source-of-truth layer.
+> 负责 CAD 图纸检查和修改。
 
-### `src/app/page.tsx`
+CareerVault evaluates which evidence category is currently missing and asks exactly one next question.
 
-V1 single-page workspace with four navigation areas:
+The V1 interview goals are:
 
-1. personal profile;
-2. experience vault;
-3. job match;
-4. one-page resume.
+- specificity — what the user actually did;
+- tool — real tools, software, methods, or technologies used;
+- scale — quantity, frequency, coverage, or scope when known;
+- result — deliverable, output, change, or outcome;
+- ownership — independent / primary / shared / participant / support;
+- difficulty — a real obstacle and how it was handled;
+- evidence — material that can support recall or credibility.
 
-The six requested capabilities are implemented across these four screens to keep navigation simple.
+Question priority changes by experience type. An internship prioritizes concrete work and scale, while a project prioritizes personal ownership and technical contribution.
 
-## Truth model
+The interviewer supports three important escape paths:
 
-CareerVault uses two conceptual layers.
+- `记不清`
+- `跳过`
+- explicit statements such as `没有统计`
 
-### Fact layer
+These answers never trigger fabricated replacement data.
 
-User-owned source material:
+## Experience readiness
 
-- raw description;
-- actions;
-- tools;
-- outcomes;
-- verified facts.
+Each draft has an information-readiness indicator rather than a fake resume score.
 
-AI must not silently mutate this layer.
+The indicator checks whether the system has enough information to write a defensible resume line:
 
-### Expression layer
+- basic context;
+- concrete action;
+- tool or method;
+- scale;
+- result or deliverable;
+- personal ownership;
+- difficulty / problem solving;
+- evidence material.
 
-Generated material:
+Readiness labels are intentionally descriptive:
 
-- relevance ranking;
-- selected experiences;
-- reordered evidence;
-- job-specific wording;
-- resume summary and bullets.
+- 信息不足
+- 继续补充
+- 可生成
+- 强经历
 
-The expression layer may change per job without changing source facts.
+They are not predictions of hiring success.
 
-## AI integration boundary
+## HR rule layer
 
-The current V1 uses deterministic local logic so the repository is usable without API keys.
+`src/lib/hrRules.ts` contains deterministic professional resume rules.
 
-A future model integration should add server-side endpoints for:
+`docs/HR_RULEBOOK.md` documents the reasoning behind these rules.
 
-- experience interview questions;
-- structured extraction from user answers;
-- semantic JD analysis;
-- job-specific resume wording.
+`src/lib/hrPrompt.ts` defines the behavioral contract for a future LLM provider. A model must follow the fact boundary above rather than acting like a generic writing assistant.
 
-Model output must be validated against stored source facts before it can appear as a factual claim in a generated resume.
+## Current implementation modules
 
-## Persistence roadmap
+```text
+src/lib/types.ts
+    Shared profile, experience and matching types
 
-### V1 prototype
+src/lib/interview.ts
+    Adaptive interview questions, readiness, answer extraction
 
-Browser localStorage.
+src/lib/hrRules.ts
+    HR review rules and evidence-strength logic
 
-Purpose: prove user flow with zero setup.
+src/lib/hrPrompt.ts
+    Future LLM behavior contract
 
-### Next persistence step
+src/lib/matching.ts
+    Transparent JD-to-experience matching
 
-Add authentication and a real database only after the V1 flow is validated. Recommended entities:
+src/lib/resume.ts
+    Resume wording from stored facts
+```
 
-- User
-- Profile
-- Experience
-- VerifiedFact
-- JobDescription
-- MatchRun
-- ResumeVersion
+## Persistence
 
-`ResumeVersion` should reference source experience/fact IDs so generated content remains traceable.
+V1 uses browser `localStorage` under the key:
 
-## Non-goals
+```text
+careervault-v1
+```
 
-Do not expand V1 into a general recruitment platform. In particular, avoid job scraping, auto-apply, social features, application CRM, dozens of templates, and speculative ATS scoring before the six-function core is stable.
+Only saved profile data, experiences and JD text are persisted. Interview UI state is temporary.
+
+A later release can replace local persistence with an account + database layer without changing the fact model.
+
+## Future AI integration point
+
+The deterministic interview engine is intentionally usable before an external model is connected.
+
+A future model adapter should improve:
+
+- extracting structured facts from natural-language answers;
+- choosing a more context-aware next question;
+- understanding JD semantics;
+- rewriting resume bullets with better language.
+
+It must not become the source of truth. Every generated claim still has to trace back to stored user facts.
