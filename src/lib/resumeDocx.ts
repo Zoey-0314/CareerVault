@@ -23,6 +23,8 @@ export interface ResumeDocxInput {
   credentials: Credential[];
 }
 
+type ParagraphAlignment = (typeof AlignmentType)[keyof typeof AlignmentType];
+
 const noBorders = {
   top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
   bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
@@ -32,7 +34,7 @@ const noBorders = {
   insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
 };
 
-function p(text: string, options?: { bold?: boolean; size?: number; color?: string; before?: number; after?: number; align?: AlignmentType }) {
+function p(text: string, options?: { bold?: boolean; size?: number; color?: string; before?: number; after?: number; align?: ParagraphAlignment }) {
   return new Paragraph({
     alignment: options?.align,
     spacing: { before: options?.before ?? 0, after: options?.after ?? 80, line: 280 },
@@ -182,7 +184,7 @@ export async function buildResumeDocx(input: ResumeDocxInput): Promise<Blob> {
     ],
   }));
 
-  const children = [
+  const children: Array<Table | Paragraph> = [
     header,
     sectionHeading("教育背景", "Education"),
     education,
