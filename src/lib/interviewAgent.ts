@@ -47,6 +47,7 @@ const OWNERSHIP_PATTERNS: Array<[RegExp, string]> = [
 
 const UNCERTAIN_PATTERNS = [/大概/i, /好像/i, /可能/i, /差不多/i, /应该/i, /记不清/i, /不确定/i];
 const NUMBER_PATTERN = /(约|大概|超过|累计|共)?\s*\d+(?:\.\d+)?\s*(?:\+|多|余)?\s*(?:张|份|篇|场|次|人|个|项|条|小时|天|周|月|年|%)/g;
+const HAS_NUMBER_PATTERN = /(约|大概|超过|累计|共)?\s*\d+(?:\.\d+)?\s*(?:\+|多|余)?\s*(?:张|份|篇|场|次|人|个|项|条|小时|天|周|月|年|%)/;
 
 function unique<T>(items: T[]): T[] {
   return Array.from(new Set(items));
@@ -69,7 +70,7 @@ function nextGoalFromExperience(experience: Experience): InterviewGoal | undefin
   if (experience.actions.trim().length < 8) return "specificity";
   if (!experience.tools.trim()) return "tool";
   const allText = [experience.rawDescription, experience.actions, experience.outcomes, ...experience.verifiedFacts].join(" ");
-  if (!NUMBER_PATTERN.test(allText)) return "scale";
+  if (!HAS_NUMBER_PATTERN.test(allText)) return "scale";
   if (!experience.outcomes.trim()) return "result";
   if (!experience.verifiedFacts.some((fact) => fact.startsWith("个人贡献："))) return "ownership";
   if (!experience.verifiedFacts.some((fact) => fact.startsWith("难点："))) return "difficulty";
