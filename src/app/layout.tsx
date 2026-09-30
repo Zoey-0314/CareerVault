@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./resume-reference.css";
 
 export const metadata: Metadata = {
   title: "CareerVault — Career Memory & Resume Tailoring",
