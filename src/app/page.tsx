@@ -12,7 +12,7 @@ import { analyzeCredentialWithProvider, analyzeInterviewWithProvider, analyzeJdF
 import { getCloudUser, isCloudConfigured, loadVaultFromCloud, saveVaultToCloud, sendMagicLink, signOutCloud } from "@/lib/cloud";
 import { assessCredentialLocally, credentialLevelLabel, sortCredentials } from "@/lib/credentials";
 import { getExperienceEvidenceStrength, reviewCandidateProfile } from "@/lib/hrRules";
-import { getExperienceReadiness, getNextInterviewQuestion, type InterviewGoal } from "@/lib/interview";
+import { getExperienceReadiness, getNextInterviewQuestion, type InterviewGoal, type InterviewQuestion } from "@/lib/interview";
 import { applyConfirmedAgentFacts, type ExtractedFact } from "@/lib/interviewAgent";
 import { matchExperiences } from "@/lib/matching";
 import { createBackup, fileToCompressedDataUrl, fileToDataUrl, loadVaultState, parseBackup, saveVaultState } from "@/lib/persistence";
@@ -79,6 +79,10 @@ export default function Home() {
   const [pendingFacts, setPendingFacts] = useState<ExtractedFact[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [providerLabel, setProviderLabel] = useState("Local");
+  const [remoteInterviewEnabled, setRemoteInterviewEnabled] = useState(false);
+  const [agentQuestion, setAgentQuestion] = useState<InterviewQuestion | null>(null);
+  const [askedQuestions, setAskedQuestions] = useState<string[]>([]);
+  const [interviewError, setInterviewError] = useState("");
   const [conversation, setConversation] = useState<CoachMessage[]>([message("coach", "先不用想怎么写简历。告诉我真实做过什么，我会只追问最有价值、最能被证明的信息。")]);
 
   const [credentialDraft, setCredentialDraft] = useState<Credential>(emptyCredential);
@@ -106,7 +110,9 @@ export default function Home() {
       const state = await loadVaultState();
       if (!mounted) return;
       setProfile(state.profile); setExperiences(state.experiences); setCredentials(state.credentials); setJd(state.jd);
-      setProviderLabel(isRemoteAiConfigured() ? "GPT" : "Local");
+      const remote = isRemoteAiConfigured();
+      setRemoteInterviewEnabled(remote);
+      setProviderLabel(remote ? "GPT · 待连接" : "Local");
       if (isCloudConfigured()) {
         const user = await getCloudUser().catch(() => null);
         if (user) { setCloudUserId(user.id); setCloudUserEmail(user.email || "已登录"); }
@@ -126,7 +132,8 @@ export default function Home() {
   const matches = useMemo(() => matchExperiences(jd, experiences), [jd, experiences]);
   const hrReview = useMemo(() => reviewCandidateProfile(profile, experiences), [profile, experiences]);
   const readiness = useMemo(() => getExperienceReadiness(draft), [draft]);
-  const currentQuestion = useMemo(() => getNextInterviewQuestion(draft, skippedGoals), [draft, skippedGoals]);
+  const localQuestion = useMemo(() => getNextInterviewQuestion(draft, skippedGoals), [draft, skippedGoals]);
+  const currentQuestion = remoteInterviewEnabled ? agentQuestion : localQuestion;
   const sortedCredentials = useMemo(() => sortCredentials(credentials), [credentials]);
   const completion = Math.min(100, Math.round(
     ([profile.name, profile.email, profile.school, profile.major, profile.graduation].filter(Boolean).length / 5) * 30 +
@@ -134,13 +141,16 @@ export default function Home() {
   ));
 
   function pushConversation(...items: CoachMessage[]) { setConversation((current) => [...current, ...items].slice(-12)); }
+  function resetInterviewState() {
+    setInterviewAnswer(""); setSkippedGoals([]); setPendingFacts([]); setAgentQuestion(null); setAskedQuestions([]); setInterviewError("");
+  }
   function resetDraft() {
-    setDraft(emptyExperience()); setEditingExperienceId(null); setInterviewAnswer(""); setSkippedGoals([]); setPendingFacts([]);
+    setDraft(emptyExperience()); setEditingExperienceId(null); resetInterviewState();
     setConversation([message("coach", "开始下一段经历。用最普通的话告诉我你做过什么就可以。")]);
   }
   function editExperience(item: Experience) {
-    setDraft({ ...item, verifiedFacts: [...item.verifiedFacts] }); setEditingExperienceId(item.id); setInterviewAnswer(""); setSkippedGoals([]); setPendingFacts([]);
-    setConversation([message("coach", `正在编辑“${item.title}”。你可以直接修改左侧字段，也可以继续回答问题补充事实。`)]);
+    setDraft({ ...item, verifiedFacts: [...item.verifiedFacts] }); setEditingExperienceId(item.id); resetInterviewState();
+    setConversation([message("coach", `正在编辑“${item.title}”。我会先重新阅读已有事实，再决定还有什么真正值得追问。`)]);
     window.setTimeout(() => document.getElementById("experience-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
   function saveExperience() {
@@ -149,25 +159,82 @@ export default function Home() {
     else setExperiences((current) => [{ ...draft }, ...current]);
     resetDraft();
   }
-  async function submitInterviewAnswer() {
-    if (!currentQuestion || isAnalyzing) return;
-    const answer = interviewAnswer.trim(); if (!answer) return;
-    pushConversation(message("user", answer));
-    if (uncertainAnswers.some((item) => answer.includes(item))) {
-      setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal]))); pushConversation(message("coach", "不知道就不编。我先跳过这一项，继续找能被证明的信息。")); setInterviewAnswer(""); return;
-    }
-    setIsAnalyzing(true);
+
+  async function requestAiQuestion(experience = draft) {
+    if (!remoteInterviewEnabled || isAnalyzing || !experience.rawDescription.trim()) return;
+    setIsAnalyzing(true); setInterviewError(""); setProviderLabel("GPT · 连接中");
     try {
-      const result = await analyzeInterviewWithProvider(answer, draft);
-      setDraft(applyConfirmedAgentFacts(draft, result.analysis));
-      const pending = result.analysis.extractedFacts.filter((fact) => fact.status === "needs_confirmation");
-      setPendingFacts(pending); setProviderLabel(result.provider === "openai" ? `GPT${result.model ? ` · ${result.model}` : ""}` : "Local");
-      pushConversation(message("coach", pending.length ? `${result.analysis.acknowledgement} 有 ${pending.length} 条内容需要你确认后我才会保存。` : `${result.analysis.acknowledgement} 已把能确认的事实写入经历卡。`));
-      setInterviewAnswer("");
+      const result = await analyzeInterviewWithProvider("", experience, { askedQuestions });
+      setAgentQuestion(result.analysis.nextQuestion || null);
+      setProviderLabel(`GPT${result.model ? ` · ${result.model}` : ""}`);
+      if (result.analysis.nextQuestion) {
+        pushConversation(message("coach", `我已经读完现有信息。下一步最值得补的是：${result.analysis.nextQuestion.question}`));
+      } else {
+        pushConversation(message("coach", "我已经读完现有信息，目前没有必须继续追问的高价值缺口。"));
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "AI 面试调用失败。";
+      setProviderLabel("GPT · 调用失败"); setInterviewError(detail);
     } finally { setIsAnalyzing(false); }
   }
+
+  async function submitInterviewValue(answer: string) {
+    if (!currentQuestion || isAnalyzing || !answer.trim()) return;
+    const value = answer.trim();
+    pushConversation(message("user", value));
+
+    if (!remoteInterviewEnabled) {
+      if (uncertainAnswers.some((item) => value.includes(item))) {
+        setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
+        pushConversation(message("coach", "不知道就不编。我先跳过这一项，继续找能被证明的信息。"));
+        setInterviewAnswer(""); return;
+      }
+    }
+
+    setIsAnalyzing(true); setInterviewError("");
+    try {
+      const nextAsked = remoteInterviewEnabled ? [...askedQuestions, currentQuestion.question].slice(-12) : askedQuestions;
+      const result = await analyzeInterviewWithProvider(value, draft, {
+        previousQuestion: currentQuestion,
+        askedQuestions: nextAsked,
+      });
+      const nextDraft = applyConfirmedAgentFacts(draft, result.analysis);
+      setDraft(nextDraft);
+      const pending = result.analysis.extractedFacts.filter((fact) => fact.status === "needs_confirmation");
+      setPendingFacts(pending);
+
+      if (result.provider === "openai") {
+        setAskedQuestions(nextAsked);
+        setAgentQuestion(result.analysis.nextQuestion || null);
+        setProviderLabel(`GPT${result.model ? ` · ${result.model}` : ""}`);
+      } else {
+        setProviderLabel("Local");
+      }
+
+      const acknowledgement = result.analysis.acknowledgement || "已读取这轮回答。";
+      const warningText = result.analysis.warnings?.length ? ` ${result.analysis.warnings.join(" ")}` : "";
+      pushConversation(message("coach", pending.length
+        ? `${acknowledgement} 有 ${pending.length} 条内容需要你确认后我才会保存。${warningText}`
+        : `${acknowledgement}${warningText}`));
+      setInterviewAnswer("");
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "AI 面试调用失败。";
+      setProviderLabel("GPT · 调用失败"); setInterviewError(detail);
+      pushConversation(message("coach", `这轮没有写入任何 AI 结果。调用失败：${detail}`));
+    } finally { setIsAnalyzing(false); }
+  }
+
+  async function submitInterviewAnswer() { await submitInterviewValue(interviewAnswer); }
+  async function skipCurrentQuestion() {
+    if (!currentQuestion) return;
+    if (remoteInterviewEnabled) {
+      await submitInterviewValue("这个问题我目前不知道、记不清或不适用，请不要重复询问这一项，继续判断下一条最有价值的问题。");
+      return;
+    }
+    setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
+  }
   function chooseQuickOption(option: string) {
-    if (uncertainAnswers.some((item) => option.includes(item))) {
+    if (!remoteInterviewEnabled && uncertainAnswers.some((item) => option.includes(item))) {
       if (currentQuestion) setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
       pushConversation(message("user", option), message("coach", "这项没有可靠信息就不写。")); return;
     }
@@ -257,8 +324,8 @@ export default function Home() {
     try {
       const result = parseWorkspaceImport(workspaceImportText); setWorkspaceQuestions(result.questions);
       if (result.questions.length) {
-        setDraft(result.experience); setEditingExperienceId(null); setPendingFacts([]); setSkippedGoals([]);
-        setConversation([message("coach", `工作区已经提供了大量可验证事实。还剩 ${result.questions.length} 个无法从代码判断的问题，我们只补这些。`), ...result.questions.map((question) => message("coach", question))]);
+        setDraft(result.experience); setEditingExperienceId(null); resetInterviewState();
+        setConversation([message("coach", `工作区已经提供了大量可验证事实。接下来让 GPT 重新阅读这些事实，只问工作区确实无法判断的高价值问题。`)]);
       } else { setExperiences((current) => [result.experience, ...current]); setWorkspaceImportText(""); }
     } catch (error) { setWorkspaceQuestions([error instanceof Error ? error.message : "无法识别导入内容，请确认粘贴的是完整 CareerVault JSON。"]); }
   }
@@ -323,10 +390,18 @@ export default function Home() {
       {tab === "profile" && <section className="sectionStack narrow"><div className="sectionIntro"><span className="eyebrow">PERSONAL PROFILE</span><h2>只保留 HR 真正需要的基础信息</h2><p>默认不要求年龄、性别、详细住址、身高等低价值或敏感字段。</p></div><article className="panel formPanel"><div className="formGrid">{([ ["name", "姓名"], ["email", "邮箱"], ["phone", "电话"], ["city", "求职城市"], ["school", "学校"], ["major", "专业"], ["degree", "学历"], ["graduation", "毕业时间"] ] as const).map(([key, label]) => <label key={key}><span>{label}</span><input value={profile[key]} onChange={(e) => setProfile({ ...profile, [key]: e.target.value })} /></label>)}</div></article><article className="panel"><div className="panelHeading"><div><span className="eyebrow">HR SCREENING</span><h3>初筛意见</h3></div></div><div className="reviewList">{hrReview.map((item) => <div className="reviewRow" key={item.title}>{item.type === "pass" ? <CheckCircle2 size={17} /> : <CircleAlert size={17} />}<div><strong>{item.title}</strong><span>{item.detail}</span></div></div>)}</div></article></section>}
 
       {tab === "experiences" && <section className="sectionStack">
-        <div className="sectionIntro"><span className="eyebrow">EXPERIENCE VAULT</span><h2>先说事实，简历语言交给专业 HR 规则。</h2><p>已保存的经历也可以随时重新打开修改，不需要删除重建。</p></div>
-        <article className="panel workspaceImport"><div className="panelHeading"><div><span className="eyebrow">WORKSPACE IMPORT</span><h3>Vibe Coding / AI Coding 项目一键提取</h3><p>让真正看得到仓库和 Git 历史的 AI 帮你整理事实，CareerVault 只补工作区无法判断的问题。</p></div><FolderGit2 size={20} /></div><div className="buttonRow"><button className="button primary" onClick={copyWorkspacePrompt}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "已复制" : "复制工作区 Prompt"}</button></div><textarea rows={6} value={workspaceImportText} onChange={(e) => setWorkspaceImportText(e.target.value)} placeholder="把工作区返回的 CAREERVAULT_IMPORT_V1 JSON 粘贴到这里…" /><div className="buttonRow"><button className="button secondary" disabled={!workspaceImportText.trim()} onClick={importWorkspaceResult}><FileJson size={15} />解析并导入</button></div>{workspaceQuestions.length > 0 && <div className="questionNotice"><CircleAlert size={16} /><div><strong>还有这些事实无法从工作区确认</strong>{workspaceQuestions.map((q) => <span key={q}>{q}</span>)}</div></div>}</article>
-        <div className="interviewGrid" id="experience-editor"><article className="panel formPanel"><div className="panelHeading"><div><span className="eyebrow">{editingExperienceId ? "EDIT EXPERIENCE" : "NEW EXPERIENCE"}</span><h3>{editingExperienceId ? "修改已有经历" : "经历基础信息"}</h3></div>{editingExperienceId && <button className="iconButton" onClick={resetDraft} aria-label="取消编辑"><X size={16} /></button>}</div><div className="formGrid"><label><span>类型</span><select value={draft.type} onChange={(e) => { setDraft({ ...draft, type: e.target.value as ExperienceType }); setSkippedGoals([]); }}>{Object.entries(experienceLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>岗位 / 项目</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label><label><span>公司 / 组织</span><input value={draft.organization} onChange={(e) => setDraft({ ...draft, organization: e.target.value })} /></label><label><span>开始</span><input type="month" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} /></label><label><span>结束</span><input type="month" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} /></label></div><label><span>用自己的话说你做了什么</span><textarea rows={5} value={draft.rawDescription} onChange={(e) => setDraft({ ...draft, rawDescription: e.target.value })} /></label><details className="details" open={Boolean(editingExperienceId)}><summary>查看 / 手动修改已提取事实</summary><label><span>具体动作</span><textarea rows={3} value={draft.actions} onChange={(e) => setDraft({ ...draft, actions: e.target.value })} /></label><label><span>工具 / 技术</span><input value={draft.tools} onChange={(e) => setDraft({ ...draft, tools: e.target.value })} /></label><label><span>结果 / 交付</span><textarea rows={3} value={draft.outcomes} onChange={(e) => setDraft({ ...draft, outcomes: e.target.value })} /></label><label><span>已确认事实（每行一条）</span><textarea rows={4} value={draft.verifiedFacts.join("\n")} onChange={(e) => setDraft({ ...draft, verifiedFacts: e.target.value.split("\n").map((line) => line.trim()).filter(Boolean) })} /></label></details></article>
-          <article className="panel coachPanel"><div className="coachTop"><div><span className="coachMark"><BriefcaseBusiness size={16} /></span><div><strong>CareerVault HR Coach</strong><span>{providerLabel} · 一次只问一个问题</span></div></div><div className="readiness">{readiness.score}%</div></div><div className="progressTrack"><span style={{ width: `${readiness.score}%` }} /></div><CoachTranscript messages={conversation} />{!draft.rawDescription.trim() ? <div className="emptyState">先在左侧写一句最原始的经历描述。</div> : pendingFacts.length ? <div className="pendingList">{pendingFacts.map((fact) => <div className="pendingCard" key={fact.id}><textarea rows={2} value={fact.value} onChange={(e) => setPendingFacts((current) => current.map((item) => item.id === fact.id ? { ...item, value: e.target.value } : item))} /><div className="buttonRow"><button className="button primary small" onClick={() => confirmPendingFact(fact.id)}><Check size={14} />确认</button><button className="button tertiary small" onClick={() => setPendingFacts((current) => current.filter((item) => item.id !== fact.id))}>不保存</button></div></div>)}</div> : currentQuestion ? <div className="questionBlock"><h3>{currentQuestion.question}</h3>{currentQuestion.options.length > 0 && <div className="optionRow">{currentQuestion.options.map((option) => <button key={option} onClick={() => chooseQuickOption(option)}>{option}</button>)}</div>}<textarea rows={3} value={interviewAnswer} onChange={(e) => setInterviewAnswer(e.target.value)} placeholder={currentQuestion.placeholder} /><div className="buttonRow"><button className="button primary" disabled={!interviewAnswer.trim() || isAnalyzing} onClick={submitInterviewAnswer}>{isAnalyzing ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}{isAnalyzing ? "分析中" : "回答并继续"}</button><button className="button tertiary" onClick={() => setSkippedGoals((c) => currentQuestion ? Array.from(new Set([...c, currentQuestion.goal])) : c)}>跳过</button></div><p className="whyText">为什么问：{currentQuestion.why}</p></div> : <div className="successState"><CheckCircle2 size={20} /><div><strong>这段经历已达到可用状态</strong></div></div>}<div className="buttonRow"><button className="button primary full" disabled={!draft.title.trim() || !draft.organization.trim() || !draft.rawDescription.trim() || pendingFacts.length > 0} onClick={saveExperience}>{editingExperienceId ? "保存修改" : "保存到经历库"}</button>{editingExperienceId && <button className="button tertiary" onClick={resetDraft}>取消编辑</button>}</div></article></div>
+        <div className="sectionIntro"><span className="eyebrow">EXPERIENCE VAULT</span><h2>先说事实，简历语言交给专业 HR 规则。</h2><p>GPT 会先读完已有事实，再决定下一问；不会为了填满固定清单重复追问。</p></div>
+        <article className="panel workspaceImport"><div className="panelHeading"><div><span className="eyebrow">WORKSPACE IMPORT</span><h3>Vibe Coding / AI Coding 项目一键提取</h3><p>让真正看得到仓库和 Git 历史的 AI 帮你整理事实，CareerVault 再让 GPT 判断哪些内容仍值得追问。</p></div><FolderGit2 size={20} /></div><div className="buttonRow"><button className="button primary" onClick={copyWorkspacePrompt}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "已复制" : "复制工作区 Prompt"}</button></div><textarea rows={6} value={workspaceImportText} onChange={(e) => setWorkspaceImportText(e.target.value)} placeholder="把工作区返回的 CAREERVAULT_IMPORT_V1 JSON 粘贴到这里…" /><div className="buttonRow"><button className="button secondary" disabled={!workspaceImportText.trim()} onClick={importWorkspaceResult}><FileJson size={15} />解析并导入</button></div>{workspaceQuestions.length > 0 && <div className="questionNotice"><CircleAlert size={16} /><div><strong>工作区标记的待确认项</strong>{workspaceQuestions.map((q) => <span key={q}>{q}</span>)}</div></div>}</article>
+        <div className="interviewGrid" id="experience-editor"><article className="panel formPanel"><div className="panelHeading"><div><span className="eyebrow">{editingExperienceId ? "EDIT EXPERIENCE" : "NEW EXPERIENCE"}</span><h3>{editingExperienceId ? "修改已有经历" : "经历基础信息"}</h3></div>{editingExperienceId && <button className="iconButton" onClick={resetDraft} aria-label="取消编辑"><X size={16} /></button>}</div><div className="formGrid"><label><span>类型</span><select value={draft.type} onChange={(e) => { setDraft({ ...draft, type: e.target.value as ExperienceType }); resetInterviewState(); }}>{Object.entries(experienceLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>岗位 / 项目</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label><label><span>公司 / 组织</span><input value={draft.organization} onChange={(e) => setDraft({ ...draft, organization: e.target.value })} /></label><label><span>开始</span><input type="month" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} /></label><label><span>结束</span><input type="month" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} /></label></div><label><span>用自己的话说你做了什么</span><textarea rows={5} value={draft.rawDescription} onChange={(e) => { setDraft({ ...draft, rawDescription: e.target.value }); if (agentQuestion) setAgentQuestion(null); }} onBlur={() => { if (remoteInterviewEnabled && draft.rawDescription.trim() && !agentQuestion && !isAnalyzing) void requestAiQuestion(draft); }} /></label><details className="details" open={Boolean(editingExperienceId)}><summary>查看 / 手动修改已提取事实</summary><label><span>具体动作</span><textarea rows={3} value={draft.actions} onChange={(e) => setDraft({ ...draft, actions: e.target.value })} /></label><label><span>工具 / 技术</span><input value={draft.tools} onChange={(e) => setDraft({ ...draft, tools: e.target.value })} /></label><label><span>结果 / 交付</span><textarea rows={3} value={draft.outcomes} onChange={(e) => setDraft({ ...draft, outcomes: e.target.value })} /></label><label><span>已确认事实（每行一条）</span><textarea rows={4} value={draft.verifiedFacts.join("\n")} onChange={(e) => setDraft({ ...draft, verifiedFacts: e.target.value.split("\n").map((line) => line.trim()).filter(Boolean) })} /></label></details></article>
+          <article className="panel coachPanel"><div className="coachTop"><div><span className="coachMark"><BriefcaseBusiness size={16} /></span><div><strong>CareerVault HR Coach</strong><span>{providerLabel} · AI 根据已有事实决定下一问</span></div></div><div className="readiness">{readiness.score}%</div></div><div className="progressTrack"><span style={{ width: `${readiness.score}%` }} /></div><CoachTranscript messages={conversation} />
+          {!draft.rawDescription.trim() ? <div className="emptyState">先在左侧写一句最原始的经历描述。</div>
+          : interviewError ? <div className="questionNotice"><CircleAlert size={16} /><div><strong>GPT 调用失败，本轮没有退回固定问答</strong><span>{interviewError}</span><button className="button secondary small" disabled={isAnalyzing} onClick={() => requestAiQuestion()}><RefreshCw size={14} />重试连接并生成下一问</button></div></div>
+          : pendingFacts.length ? <div className="pendingList">{pendingFacts.map((fact) => <div className="pendingCard" key={fact.id}><textarea rows={2} value={fact.value} onChange={(e) => setPendingFacts((current) => current.map((item) => item.id === fact.id ? { ...item, value: e.target.value } : item))} /><div className="buttonRow"><button className="button primary small" onClick={() => confirmPendingFact(fact.id)}><Check size={14} />确认</button><button className="button tertiary small" onClick={() => setPendingFacts((current) => current.filter((item) => item.id !== fact.id))}>不保存</button></div></div>)}</div>
+          : isAnalyzing && remoteInterviewEnabled && !currentQuestion ? <div className="questionNotice"><Loader2 className="spin" size={16} /><div><strong>GPT 正在阅读已有经历</strong><span>它会根据已有事实和 HR 规则决定下一问。</span></div></div>
+          : remoteInterviewEnabled && !currentQuestion ? <div className="successState"><Sparkles size={20} /><div><strong>{readiness.score >= 60 ? "当前没有必须继续追问的高价值缺口" : "让 GPT 先阅读现有信息"}</strong><span>{readiness.score >= 60 ? "你可以直接保存；需要时也可以重新让 GPT 检查。" : "它不会直接套固定问题清单。"}</span><button className="button secondary small" onClick={() => requestAiQuestion()}><Sparkles size={14} />{readiness.score >= 60 ? "再检查一次" : "生成下一问"}</button></div></div>
+          : currentQuestion ? <div className="questionBlock"><span className="eyebrow">AI NEXT QUESTION · {currentQuestion.goal}</span><h3>{currentQuestion.question}</h3>{currentQuestion.options.length > 0 && <div className="optionRow">{currentQuestion.options.map((option) => <button key={option} onClick={() => chooseQuickOption(option)}>{option}</button>)}</div>}<textarea rows={3} value={interviewAnswer} onChange={(e) => setInterviewAnswer(e.target.value)} placeholder={currentQuestion.placeholder} /><div className="buttonRow"><button className="button primary" disabled={!interviewAnswer.trim() || isAnalyzing} onClick={submitInterviewAnswer}>{isAnalyzing ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}{isAnalyzing ? "GPT 思考中" : "回答并继续"}</button><button className="button tertiary" disabled={isAnalyzing} onClick={skipCurrentQuestion}>不知道 / 跳过</button></div><p className="whyText">为什么问：{currentQuestion.why}</p></div>
+          : <div className="successState"><CheckCircle2 size={20} /><div><strong>这段经历已达到可用状态</strong></div></div>}
+          <div className="buttonRow"><button className="button primary full" disabled={!draft.title.trim() || !draft.organization.trim() || !draft.rawDescription.trim() || pendingFacts.length > 0} onClick={saveExperience}>{editingExperienceId ? "保存修改" : "保存到经历库"}</button>{editingExperienceId && <button className="button tertiary" onClick={resetDraft}>取消编辑</button>}</div></article></div>
         <div className="libraryHeader"><div><span className="eyebrow">LIBRARY</span><h3>我的经历</h3></div><span>{experiences.length} 条</span></div>{experiences.length === 0 ? <div className="emptyState panel">还没有经历。</div> : <div className="cardGrid">{experiences.map((item) => { const r = getExperienceReadiness(item); return <article className="assetCard" key={item.id}><div className="assetTop"><span className="softTag">{experienceLabels[item.type]}</span><div className="buttonRow"><button className="iconButton" onClick={() => editExperience(item)}><Pencil size={15} /></button><button className="iconButton" onClick={() => setExperiences((current) => current.filter((x) => x.id !== item.id))}><Trash2 size={15} /></button></div></div><h4>{item.title}</h4><span className="metaLine">{item.organization} · {item.startDate || "?"} — {item.endDate || "至今"}</span><p>{item.rawDescription}</p><div className="assetFooter"><span>完整度 {r.score}%</span></div></article>; })}</div>}
       </section>}
 
