@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { CoachTranscript, type CoachMessage } from "@/components/CoachTranscript";
 import { analyzeInterviewWithProvider, isRemoteAiConfigured } from "@/lib/aiClient";
 import { applyConfirmedAgentFacts, type ExtractedFact } from "@/lib/interviewAgent";
 import { matchExperiences } from "@/lib/matching";
@@ -60,6 +61,14 @@ function applyOneFact(experience: Experience, fact: ExtractedFact): Experience {
   return { ...experience, verifiedFacts: [...experience.verifiedFacts, fact.value] };
 }
 
+function message(role: CoachMessage["role"], text: string): CoachMessage {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    text,
+  };
+}
+
 export default function Home() {
   const [tab, setTab] = useState<"profile" | "experiences" | "job" | "resume">("profile");
   const [profile, setProfile] = useState<Profile>(emptyProfile);
@@ -73,6 +82,9 @@ export default function Home() {
   const [pendingFacts, setPendingFacts] = useState<ExtractedFact[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [providerLabel, setProviderLabel] = useState("Local");
+  const [conversation, setConversation] = useState<CoachMessage[]>([
+    message("coach", "先不用想怎么写简历。告诉我你真实做过什么，我会像 HR 一样一点点追问。"),
+  ]);
 
   useEffect(() => {
     const saved = localStorage.getItem("careervault-v1");
@@ -117,12 +129,17 @@ export default function Home() {
       (jd.trim() ? 20 : 0),
   );
 
+  function pushConversation(...items: CoachMessage[]) {
+    setConversation((current) => [...current, ...items].slice(-12));
+  }
+
   function resetDraft() {
     setDraft(emptyExperience());
     setInterviewAnswer("");
     setSkippedGoals([]);
     setPendingFacts([]);
     setCoachNote("先用你自己的话写一句经历，我会从最值得追问的地方开始。 ");
+    setConversation([message("coach", "开始下一段经历吧。先告诉我最原始的事实，不需要用简历语言。")]);
   }
 
   function saveExperience() {
@@ -140,9 +157,13 @@ export default function Home() {
     const answer = interviewAnswer.trim();
     if (!answer) return;
 
+    pushConversation(message("user", answer));
+
     if (uncertainAnswers.some((item) => answer.includes(item))) {
       setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
-      setCoachNote("可以，不知道就不编。我会跳过这一项，继续找更能证明你的信息。 ");
+      const text = "可以，不知道就不编。这一项我先跳过，继续找更能证明你的信息。";
+      setCoachNote(text);
+      pushConversation(message("coach", text));
       setInterviewAnswer("");
       return;
     }
@@ -157,11 +178,11 @@ export default function Home() {
       setProviderLabel(result.provider === "openai" ? `GPT${result.model ? ` · ${result.model}` : ""}` : "Local");
 
       const warningText = result.analysis.warnings.length ? ` ${result.analysis.warnings.join(" ")}` : "";
-      if (needsConfirmation.length) {
-        setCoachNote(`${result.analysis.acknowledgement} 其中 ${needsConfirmation.length} 条需要你确认后才会进入事实库。${warningText}`);
-      } else {
-        setCoachNote(`${result.analysis.acknowledgement} 已确认的信息已经入库，我会根据当前缺口继续追问。${warningText}`);
-      }
+      const text = needsConfirmation.length
+        ? `${result.analysis.acknowledgement} 其中 ${needsConfirmation.length} 条我不敢直接当事实，需要你确认。${warningText}`
+        : `${result.analysis.acknowledgement} 已确认的信息已经入库。${warningText}`;
+      setCoachNote(text);
+      pushConversation(message("coach", text));
       setInterviewAnswer("");
     } finally {
       setIsAnalyzing(false);
@@ -172,7 +193,9 @@ export default function Home() {
     if (uncertainAnswers.some((item) => option.includes(item))) {
       if (!currentQuestion) return;
       setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
-      setCoachNote("这项没有可靠信息就不写。我会继续问下一项。 ");
+      const text = "这项没有可靠信息就不写，我会换一个角度继续问。";
+      setCoachNote(text);
+      pushConversation(message("user", option), message("coach", text));
       setInterviewAnswer("");
       return;
     }
@@ -182,7 +205,9 @@ export default function Home() {
   function skipCurrentQuestion(reason: "skip" | "unknown") {
     if (!currentQuestion) return;
     setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
-    setCoachNote(reason === "unknown" ? "记不清没关系，这一项不会被写进简历。 " : "已跳过。后续生成简历时不会假设你拥有这项信息。 ");
+    const text = reason === "unknown" ? "记不清没关系，这一项不会被写进简历。" : "已跳过，我不会假设你拥有这项信息。";
+    setCoachNote(text);
+    pushConversation(message("user", reason === "unknown" ? "记不清" : "跳过"), message("coach", text));
     setInterviewAnswer("");
   }
 
@@ -195,12 +220,17 @@ export default function Home() {
     if (!fact?.value.trim()) return;
     setDraft((current) => applyOneFact(current, { ...fact, status: "confirmed", confidence: 1 }));
     setPendingFacts((current) => current.filter((item) => item.id !== id));
-    setCoachNote("已按你确认后的文字保存。模型原来的推断不会覆盖你的修改。 ");
+    const text = `已确认并保存：“${fact.value}”。你的修改优先于模型推断。`;
+    setCoachNote(text);
+    pushConversation(message("user", `确认：${fact.value}`), message("coach", text));
   }
 
   function rejectPendingFact(id: string) {
+    const fact = pendingFacts.find((item) => item.id === id);
     setPendingFacts((current) => current.filter((item) => item.id !== id));
-    setCoachNote("这条没有进入事实库。后续生成简历时也不会使用它。 ");
+    const text = "这条没有进入事实库，后续生成简历也不会使用它。";
+    setCoachNote(text);
+    pushConversation(message("user", `不保存：${fact?.value || "这条信息"}`), message("coach", text));
   }
 
   return (
@@ -281,7 +311,7 @@ export default function Home() {
               <div className="coachColumn">
                 <div className="coachCard">
                   <div className="coachHeader">
-                    <div><span className="coachAvatar">HR</span><div><strong>CareerVault 简历顾问</strong><small>一次只问一个最有价值的问题 · {providerLabel}</small></div></div>
+                    <div><span className="coachAvatar">HR</span><div><strong>CareerVault 简历顾问</strong><small>聊天体验 · 压缩上下文 · {providerLabel}</small></div></div>
                     <span className={`readinessBadge ${readiness.score >= 60 ? "ready" : ""}`}>{readiness.score}% · {readiness.label}</span>
                   </div>
 
@@ -291,6 +321,7 @@ export default function Home() {
                   </div>
 
                   <div className="coachMessage">{coachNote}</div>
+                  <CoachTranscript messages={conversation} />
 
                   {!draft.rawDescription.trim() ? (
                     <div className="coachEmpty">先在左边写一句最原始的经历描述。哪怕只有“负责公众号运营”也可以。</div>
