@@ -1,16 +1,34 @@
 import { detectLowSignalText, getExperienceEvidenceStrength } from "@/lib/hrRules";
 import type { Experience, Profile } from "@/lib/types";
 
-function compact(parts: string[]): string {
-  return parts.map((part) => part.trim()).filter(Boolean).join("；");
-}
-
 function cleanLowSignal(text: string): string {
   let result = text;
-  for (const phrase of detectLowSignalText(text)) {
-    result = result.replaceAll(phrase, "");
+  for (const phrase of detectLowSignalText(text)) result = result.replaceAll(phrase, "");
+  return result.replace(/[；，,]{2,}/g, "；").replace(/^[-•\s]+/, "").trim();
+}
+
+function clauses(text: string): string[] {
+  return text
+    .split(/[。；;\n]+/)
+    .map((item) => cleanLowSignal(item))
+    .map((item) => item.replace(/^\d+[、.．]\s*/, "").trim())
+    .filter((item) => item.length >= 6);
+}
+
+function unique(items: string[]): string[] {
+  const result: string[] = [];
+  for (const item of items) {
+    if (!result.some((existing) => existing.includes(item) || item.includes(existing))) result.push(item);
   }
-  return result.replace(/[；，,]{2,}/g, "；").trim();
+  return result;
+}
+
+function trimBullet(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").replace(/[，；;]+$/, "").trim();
+  if (normalized.length <= 92) return normalized;
+  const preferredCut = Math.max(normalized.lastIndexOf("，", 88), normalized.lastIndexOf(",", 88));
+  if (preferredCut >= 36) return normalized.slice(0, preferredCut);
+  return `${normalized.slice(0, 88)}…`;
 }
 
 export interface ProfessionalBullet {
@@ -21,48 +39,71 @@ export interface ProfessionalBullet {
   warnings: string[];
 }
 
-export function buildProfessionalResumeBullet(experience: Experience): ProfessionalBullet {
-  const facts = experience.verifiedFacts.filter(Boolean).slice(0, 2);
-  const base = compact([
-    cleanLowSignal(experience.actions || experience.rawDescription),
-    experience.tools ? `使用 ${experience.tools}` : "",
-    cleanLowSignal(experience.outcomes),
-    facts.join("；"),
+export function buildTargetedResumeBullets(experience: Experience, matchedKeywords: string[]): string[] {
+  const keywordSet = matchedKeywords.map((item) => item.toLowerCase()).filter(Boolean);
+  const candidates = unique([
+    ...clauses(experience.actions),
+    ...clauses(experience.outcomes),
+    ...experience.verifiedFacts.flatMap(clauses),
+    ...clauses(experience.rawDescription),
   ]);
 
+  const ranked = candidates
+    .map((text, index) => {
+      const lower = text.toLowerCase();
+      const keywordHits = keywordSet.filter((keyword) => lower.includes(keyword)).length;
+      const hasResultSignal = /完成|交付|上线|修复|降低|提升|通过|负责|设计|开发|分析|检查|策划|协调|生成|部署|验证|实现|优化/.test(text);
+      const hasEvidence = /\d/.test(text) || experience.verifiedFacts.some((fact) => fact.includes(text) || text.includes(fact));
+      return { text, score: keywordHits * 6 + (hasResultSignal ? 2 : 0) + (hasEvidence ? 2 : 0) - index * 0.05 };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const matched = ranked.filter((item) => item.score >= 5);
+  const pool = matched.length ? matched : ranked.filter((item) => item.score >= 2);
+  const bullets = pool.slice(0, 3).map((item) => trimBullet(item.text));
+
+  if (!bullets.length) {
+    const fallback = trimBullet(cleanLowSignal(experience.actions || experience.outcomes || experience.rawDescription));
+    return fallback ? [fallback] : [];
+  }
+  return bullets;
+}
+
+export function buildProfessionalResumeBullet(experience: Experience): ProfessionalBullet {
+  const text = buildTargetedResumeBullets(experience, []).join("；");
   const rationale: string[] = [];
   const warnings: string[] = [];
-  if (experience.actions) rationale.push("优先保留你的具体动作，而不是只写岗位职责");
-  if (experience.tools) rationale.push("保留工具/方法，帮助 HR 判断能力是否可迁移");
-  if (experience.outcomes) rationale.push("保留结果或交付，形成完整的行动→结果证据链");
-  if (facts.length) rationale.push("使用已确认事实增强可信度");
+  if (experience.actions) rationale.push("优先保留具体动作，而不是岗位职责堆叠");
+  if (experience.outcomes) rationale.push("保留可验证结果或交付");
+  if (experience.verifiedFacts.length) rationale.push("优先使用已确认事实");
   if (!experience.outcomes) warnings.push("缺少结果/交付，建议继续追问后再投递");
-  if (!experience.verifiedFacts.length) warnings.push("缺少已确认事实，当前表述可读但证据偏弱");
-
-  return {
-    text: base || "这段经历信息不足，建议先补充具体动作和结果。",
-    rationale,
-    reasons: rationale,
-    warnings,
-  };
+  return { text: text || "这段经历信息不足，建议先补充具体动作和结果。", rationale, reasons: rationale, warnings };
 }
 
 export function buildResumeBullet(experience: Experience): string {
   return buildProfessionalResumeBullet(experience).text;
 }
 
-export function buildSummary(profile: Profile, experiences: Experience[]): string {
-  const strongest = [...experiences].sort((a, b) => getExperienceEvidenceStrength(b) - getExperienceEvidenceStrength(a));
-  const tools = Array.from(
-    new Set(
-      strongest
-        .flatMap((experience) => experience.tools.split(/[，,、/]/))
-        .map((tool) => tool.trim())
-        .filter(Boolean),
-    ),
-  ).slice(0, 4);
+export function inferTargetRole(jd: string): string {
+  const lines = jd.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines.slice(0, 5)) {
+    const match = line.match(/(?:岗位|职位|招聘岗位|职位名称|岗位名称)\s*[：:]\s*(.+)/);
+    if (match?.[1]) return match[1].trim().slice(0, 36);
+  }
+  const first = lines[0] || "";
+  if (first.length >= 2 && first.length <= 28 && !/[。；]/.test(first)) return first;
+  return "目标岗位";
+}
 
+export function buildTargetedSummary(profile: Profile, experiences: Experience[], matchedKeywords: string[]): string {
+  const strongest = [...experiences].sort((a, b) => getExperienceEvidenceStrength(b) - getExperienceEvidenceStrength(a));
   const identity = [profile.school, profile.major, profile.degree].filter(Boolean).join(" · ");
-  if (!tools.length) return identity ? `${identity}，具备可进一步挖掘的项目与实践经历。` : "请先补充教育背景和经历事实。";
-  return `${identity ? `${identity}，` : ""}具备 ${tools.join("、")} 等实践经验；简历内容将按目标岗位相关性选择，不使用无证据的性格评价。`;
+  const evidenceTools = Array.from(new Set(strongest.flatMap((item) => item.tools.split(/[，,、/]/)).map((item) => item.trim()).filter(Boolean)));
+  const relevantTerms = Array.from(new Set([...matchedKeywords, ...evidenceTools])).slice(0, 4);
+  if (!relevantTerms.length) return identity ? `${identity}；已按目标岗位筛选相关经历。` : "已按目标岗位筛选可验证经历。";
+  return `${identity ? `${identity}；` : ""}具备 ${relevantTerms.join("、")} 相关实践，以下内容仅保留与目标岗位直接相关且可核验的经历证据。`;
+}
+
+export function buildSummary(profile: Profile, experiences: Experience[]): string {
+  return buildTargetedSummary(profile, experiences, []);
 }

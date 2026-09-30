@@ -4,15 +4,30 @@ import type { Experience, JobMatch } from "@/lib/types";
 const STOP_WORDS = new Set([
   "and", "the", "with", "for", "you", "your", "our", "are", "will", "this", "that", "from",
   "工作", "岗位", "负责", "要求", "以及", "具有", "相关", "能够", "优先", "经验", "能力", "职位", "任职",
+  "我们", "公司", "团队", "进行", "完成", "参与", "熟悉", "掌握", "具备", "以上", "以下", "良好", "较强",
 ]);
 
 function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9+#.\u4e00-\u9fff]+/g, " ")
-    .split(/\s+/)
-    .map((word) => word.trim())
-    .filter((word) => word.length >= 2 && !STOP_WORDS.has(word));
+  const lower = text.toLowerCase();
+  const ascii = lower.match(/[a-z0-9+#.]{2,}/g) || [];
+  const chineseChunks = lower.match(/[\u4e00-\u9fff]{2,}/g) || [];
+  const chinese: string[] = [];
+
+  for (const chunk of chineseChunks) {
+    if (chunk.length <= 6) chinese.push(chunk);
+    for (const size of [4, 3, 2]) {
+      if (chunk.length < size) continue;
+      for (let index = 0; index <= chunk.length - size; index += 1) {
+        const token = chunk.slice(index, index + size);
+        if (!STOP_WORDS.has(token)) chinese.push(token);
+      }
+    }
+  }
+
+  return Array.from(new Set([...ascii, ...chinese]))
+    .filter((word) => word.length >= 2 && !STOP_WORDS.has(word))
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 180);
 }
 
 function experienceText(experience: Experience): string {
@@ -28,13 +43,17 @@ function experienceText(experience: Experience): string {
 }
 
 export function matchExperiences(jd: string, experiences: Experience[]): JobMatch[] {
-  const jdTokens = Array.from(new Set(tokenize(jd)));
+  const jdTokens = tokenize(jd);
 
   return experiences
     .map((experience) => {
       const text = experienceText(experience).toLowerCase();
-      const matchedKeywords = jdTokens.filter((token) => text.includes(token)).slice(0, 12);
-      const keywordCoverage = jdTokens.length === 0 ? 0 : matchedKeywords.length / Math.min(jdTokens.length, 12);
+      const matchedKeywords = jdTokens
+        .filter((token) => text.includes(token))
+        .sort((a, b) => b.length - a.length)
+        .filter((token, index, all) => !all.slice(0, index).some((existing) => existing.includes(token)))
+        .slice(0, 12);
+      const keywordCoverage = jdTokens.length === 0 ? 0 : matchedKeywords.length / Math.min(jdTokens.length, 20);
       const evidenceStrength = getExperienceEvidenceStrength(experience) / 100;
       const score = jdTokens.length === 0
         ? Math.round(evidenceStrength * 35)
