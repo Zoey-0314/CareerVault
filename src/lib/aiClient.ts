@@ -15,11 +15,14 @@ export interface AiCredentialResponse {
   extracted?: Partial<Pick<Credential, "name" | "issuer" | "date" | "rank" | "description" | "type">>;
 }
 
+const DEFAULT_PUBLIC_PROXY = "https://career-vault-sage.vercel.app/api/interview";
+
 function configuredProxyUrl(): string | undefined {
   const configured = process.env.NEXT_PUBLIC_CAREERVAULT_AI_URL?.trim();
   if (configured) return configured.replace(/\/$/, "");
-  if (typeof window !== "undefined" && window.location.hostname.endsWith("vercel.app")) {
-    return `${window.location.origin}/api/interview`;
+  if (typeof window !== "undefined") {
+    if (window.location.hostname.endsWith("vercel.app")) return `${window.location.origin}/api/interview`;
+    if (window.location.hostname === "zoey-0314.github.io") return DEFAULT_PUBLIC_PROXY;
   }
   return undefined;
 }
