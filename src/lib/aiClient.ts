@@ -15,6 +15,13 @@ export interface AiCredentialResponse {
   extracted?: Partial<Pick<Credential, "name" | "issuer" | "date" | "rank" | "description" | "type">>;
 }
 
+export interface AiJdResponse {
+  provider: "openai";
+  model?: string;
+  jdText: string;
+  roleTitle?: string;
+}
+
 const DEFAULT_PUBLIC_PROXY = "https://career-vault-sage.vercel.app/api/interview";
 
 function configuredProxyUrl(): string | undefined {
@@ -27,10 +34,10 @@ function configuredProxyUrl(): string | undefined {
   return undefined;
 }
 
-function endpointFor(kind: "interview" | "credential"): string | undefined {
+function endpointFor(kind: "interview" | "credential" | "jd"): string | undefined {
   const base = configuredProxyUrl();
   if (!base) return undefined;
-  if (/\/api\/(interview|credential)$/.test(base)) return base.replace(/\/api\/(interview|credential)$/, `/api/${kind}`);
+  if (/\/api\/(interview|credential|jd)$/.test(base)) return base.replace(/\/api\/(interview|credential|jd)$/, `/api/${kind}`);
   return `${base}/api/${kind}`;
 }
 
@@ -75,4 +82,22 @@ export async function analyzeCredentialWithProvider(credential: Credential): Pro
   } catch {
     return { provider: "local-v1", assessment: local };
   }
+}
+
+export async function analyzeJdImageWithProvider(imageDataUrl: string): Promise<AiJdResponse> {
+  const url = endpointFor("jd");
+  if (!url) throw new Error("当前部署未配置图片识别服务，请直接粘贴 JD 文本。");
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ imageDataUrl }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { detail?: string } | null;
+    throw new Error(payload?.detail || `JD 图片识别失败（${response.status}）`);
+  }
+  const payload = (await response.json()) as AiJdResponse;
+  if (!payload?.jdText?.trim()) throw new Error("图片中没有识别到可用的岗位职责或任职要求。");
+  return payload;
 }
