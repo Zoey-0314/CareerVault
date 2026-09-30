@@ -1,11 +1,17 @@
 import { analyzeInterviewTurn, type InterviewAgentAnalysis } from "@/lib/interviewAgent";
 import { assessCredentialLocally } from "@/lib/credentials";
+import { getNextInterviewQuestion, type InterviewQuestion } from "@/lib/interview";
 import type { Credential, CredentialAssessment, Experience } from "@/lib/types";
+
+export type AiInterviewAnalysis = InterviewAgentAnalysis & {
+  nextQuestion?: InterviewQuestion | null;
+  complete?: boolean;
+};
 
 export interface AiInterviewResponse {
   provider: "local-v1" | "openai";
   model?: string;
-  analysis: InterviewAgentAnalysis;
+  analysis: AiInterviewAnalysis;
 }
 
 export interface AiCredentialResponse {
@@ -24,6 +30,11 @@ export interface AiJdResponse {
   roleTitle?: string;
   visionUsed?: boolean;
   inputKind?: "image" | "pdf";
+}
+
+export interface InterviewTurnContext {
+  previousQuestion?: InterviewQuestion | null;
+  askedQuestions?: string[];
 }
 
 const DEFAULT_PUBLIC_PROXY = "https://career-vault-sage.vercel.app/api/interview";
@@ -46,26 +57,49 @@ function endpointFor(kind: "interview" | "credential" | "jd"): string | undefine
 }
 
 async function readError(response: Response, fallback: string): Promise<Error> {
-  const payload = await response.json().catch(() => null) as { detail?: string; error?: string } | null;
-  return new Error(payload?.detail || payload?.error || `${fallback}（${response.status}）`);
+  const payload = await response.json().catch(() => null) as { detail?: string; error?: string; model?: string } | null;
+  const model = payload?.model ? ` [${payload.model}]` : "";
+  return new Error(`${payload?.detail || payload?.error || `${fallback}（${response.status}）`}${model}`);
 }
 
 export function isRemoteAiConfigured(): boolean {
   return Boolean(configuredProxyUrl());
 }
 
-export async function analyzeInterviewWithProvider(answer: string, experience: Experience): Promise<AiInterviewResponse> {
+export async function analyzeInterviewWithProvider(
+  answer: string,
+  experience: Experience,
+  context: InterviewTurnContext = {},
+): Promise<AiInterviewResponse> {
   const url = endpointFor("interview");
-  if (!url) return { provider: "local-v1", analysis: analyzeInterviewTurn(answer, experience) };
-  try {
-    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer, experience }) });
-    if (!response.ok) throw new Error(`AI proxy returned ${response.status}`);
-    const payload = (await response.json()) as AiInterviewResponse;
-    if (!payload?.analysis?.extractedFacts) throw new Error("Invalid AI proxy payload");
-    return payload;
-  } catch {
-    return { provider: "local-v1", analysis: analyzeInterviewTurn(answer, experience) };
+  if (!url) {
+    const local = analyzeInterviewTurn(answer, experience);
+    return {
+      provider: "local-v1",
+      analysis: {
+        ...local,
+        nextQuestion: getNextInterviewQuestion(experience),
+        complete: !getNextInterviewQuestion(experience),
+      },
+    };
   }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      answer,
+      experience,
+      previousQuestion: context.previousQuestion || null,
+      askedQuestions: context.askedQuestions || [],
+    }),
+  });
+  if (!response.ok) throw await readError(response, "AI 面试调用失败");
+  const payload = (await response.json()) as AiInterviewResponse;
+  if (!payload?.analysis?.extractedFacts || !("nextQuestion" in payload.analysis)) {
+    throw new Error("AI 面试服务返回了无效结构。");
+  }
+  return payload;
 }
 
 export async function analyzeCredentialWithProvider(credential: Credential): Promise<AiCredentialResponse> {
