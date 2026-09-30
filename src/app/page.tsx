@@ -1,23 +1,51 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  Award,
+  BriefcaseBusiness,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  CircleAlert,
+  Cloud,
+  CloudOff,
+  Copy,
+  Database,
+  Download,
+  FileJson,
+  FileText,
+  FolderGit2,
+  Gauge,
+  ImagePlus,
+  Layers3,
+  Loader2,
+  LogOut,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
+  Target,
+  Trash2,
+  Upload,
+  UserRound,
+  WandSparkles,
+} from "lucide-react";
 import { CoachTranscript, type CoachMessage } from "@/components/CoachTranscript";
-import { analyzeInterviewWithProvider, isRemoteAiConfigured } from "@/lib/aiClient";
+import { analyzeCredentialWithProvider, analyzeInterviewWithProvider, isRemoteAiConfigured } from "@/lib/aiClient";
+import { getCloudUser, isCloudConfigured, loadVaultFromCloud, saveVaultToCloud, sendMagicLink, signOutCloud } from "@/lib/cloud";
+import { assessCredentialLocally, credentialLevelLabel, sortCredentials } from "@/lib/credentials";
+import { getExperienceEvidenceStrength, HR_RULES, reviewCandidateProfile } from "@/lib/hrRules";
+import { getExperienceReadiness, getNextInterviewQuestion, type InterviewGoal } from "@/lib/interview";
 import { applyConfirmedAgentFacts, type ExtractedFact } from "@/lib/interviewAgent";
 import { matchExperiences } from "@/lib/matching";
+import { createBackup, fileToCompressedDataUrl, loadVaultState, parseBackup, saveVaultState } from "@/lib/persistence";
 import { buildProfessionalResumeBullet, buildSummary } from "@/lib/resume";
-import { getExperienceEvidenceStrength, HR_RULES, reviewCandidateProfile } from "@/lib/hrRules";
-import {
-  getExperienceReadiness,
-  getNextInterviewQuestion,
-  type InterviewGoal,
-} from "@/lib/interview";
-import type { Experience, ExperienceType, Profile } from "@/lib/types";
+import type { Credential, CredentialType, Experience, ExperienceType, Profile, VaultState } from "@/lib/types";
+import { buildWorkspaceImportPrompt, parseWorkspaceImport } from "@/lib/vibeImport";
 
-const emptyProfile: Profile = {
-  name: "", email: "", phone: "", city: "", school: "", major: "", degree: "", graduation: "",
-};
+type Tab = "overview" | "profile" | "experiences" | "credentials" | "job" | "resume";
 
+const emptyProfile: Profile = { name: "", email: "", phone: "", city: "", school: "", major: "", degree: "", graduation: "" };
 const emptyExperience = (): Experience => ({
   id: typeof crypto !== "undefined" ? crypto.randomUUID() : Date.now().toString(),
   type: "internship",
@@ -30,22 +58,38 @@ const emptyExperience = (): Experience => ({
   tools: "",
   outcomes: "",
   verifiedFacts: [],
+  source: "manual",
+});
+const emptyCredential = (): Credential => ({
+  id: typeof crypto !== "undefined" ? crypto.randomUUID() : `${Date.now()}-credential`,
+  type: "award",
+  name: "",
+  issuer: "",
+  date: "",
+  rank: "",
+  description: "",
 });
 
-const labels: Record<ExperienceType, string> = {
-  internship: "实习经历",
-  work: "工作经历",
-  project: "项目经历",
-  campus: "校园经历",
-  competition: "比赛经历",
-  research: "科研经历",
+const experienceLabels: Record<ExperienceType, string> = {
+  internship: "实习",
+  work: "工作",
+  project: "项目",
+  campus: "校园",
+  competition: "比赛",
+  research: "科研",
   coursework: "课程设计",
-  volunteer: "志愿经历",
+  volunteer: "志愿",
 };
-
+const credentialLabels: Record<CredentialType, string> = {
+  award: "奖项",
+  certificate: "证书",
+  honor: "荣誉",
+  competition: "竞赛成绩",
+  other: "其他",
+};
 const uncertainAnswers = ["不知道", "记不清", "没有统计", "不适用", "暂时没有明确结果", "暂时没有", "其他/不适用"];
 
-function mergeText(existing: string, value: string): string {
+function mergeText(existing: string, value: string) {
   const next = value.trim();
   if (!next) return existing;
   if (!existing.trim()) return next;
@@ -62,72 +106,98 @@ function applyOneFact(experience: Experience, fact: ExtractedFact): Experience {
 }
 
 function message(role: CoachMessage["role"], text: string): CoachMessage {
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    role,
-    text,
-  };
+  return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, role, text };
 }
 
 export default function Home() {
-  const [tab, setTab] = useState<"profile" | "experiences" | "job" | "resume">("profile");
+  const [tab, setTab] = useState<Tab>("overview");
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [experiences, setExperiences] = useState<Experience[]>([]);
-  const [draft, setDraft] = useState<Experience>(emptyExperience);
+  const [credentials, setCredentials] = useState<Credential[]>([]);
   const [jd, setJd] = useState("");
   const [hydrated, setHydrated] = useState(false);
+
+  const [draft, setDraft] = useState<Experience>(emptyExperience);
   const [interviewAnswer, setInterviewAnswer] = useState("");
   const [skippedGoals, setSkippedGoals] = useState<InterviewGoal[]>([]);
-  const [coachNote, setCoachNote] = useState("先用你自己的话写一句经历，我会从最值得追问的地方开始。 ");
   const [pendingFacts, setPendingFacts] = useState<ExtractedFact[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [providerLabel, setProviderLabel] = useState("Local");
   const [conversation, setConversation] = useState<CoachMessage[]>([
-    message("coach", "先不用想怎么写简历。告诉我你真实做过什么，我会像 HR 一样一点点追问。"),
+    message("coach", "先不用想怎么写简历。告诉我真实做过什么，我会只追问最有价值、最能被证明的信息。"),
   ]);
 
+  const [credentialDraft, setCredentialDraft] = useState<Credential>(emptyCredential);
+  const [credentialAnalyzing, setCredentialAnalyzing] = useState(false);
+  const [credentialProvider, setCredentialProvider] = useState("Local");
+
+  const [workspaceImportText, setWorkspaceImportText] = useState("");
+  const [workspaceQuestions, setWorkspaceQuestions] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
+
+  const [cloudEmail, setCloudEmail] = useState("");
+  const [cloudUserEmail, setCloudUserEmail] = useState("");
+  const [cloudUserId, setCloudUserId] = useState("");
+  const [cloudNote, setCloudNote] = useState("");
+  const [cloudBusy, setCloudBusy] = useState(false);
+
   useEffect(() => {
-    const saved = localStorage.getItem("careervault-v1");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as { profile?: Profile; experiences?: Experience[]; jd?: string };
-        if (parsed.profile) setProfile({ ...emptyProfile, ...parsed.profile });
-        if (parsed.experiences) setExperiences(parsed.experiences);
-        if (parsed.jd) setJd(parsed.jd);
-      } catch {
-        // Ignore malformed local demo data.
+    let mounted = true;
+    (async () => {
+      const state = await loadVaultState();
+      if (!mounted) return;
+      setProfile(state.profile);
+      setExperiences(state.experiences);
+      setCredentials(state.credentials);
+      setJd(state.jd);
+      setProviderLabel(isRemoteAiConfigured() ? "GPT" : "Local");
+      if (isCloudConfigured()) {
+        const user = await getCloudUser().catch(() => null);
+        if (user) {
+          setCloudUserId(user.id);
+          setCloudUserEmail(user.email || "已登录");
+        }
       }
-    }
-    setProviderLabel(isRemoteAiConfigured() ? "GPT" : "Local");
-    setHydrated(true);
+      setHydrated(true);
+    })();
+    return () => { mounted = false; };
   }, []);
+
+  const vaultState = useMemo<VaultState>(() => ({
+    version: 2,
+    profile,
+    experiences,
+    credentials,
+    jd,
+    updatedAt: new Date().toISOString(),
+  }), [profile, experiences, credentials, jd]);
 
   useEffect(() => {
     if (!hydrated) return;
-    localStorage.setItem("careervault-v1", JSON.stringify({ profile, experiences, jd }));
-  }, [profile, experiences, jd, hydrated]);
+    const timer = window.setTimeout(() => saveVaultState(vaultState), 250);
+    return () => window.clearTimeout(timer);
+  }, [vaultState, hydrated]);
 
   const matches = useMemo(() => matchExperiences(jd, experiences), [jd, experiences]);
   const hrReview = useMemo(() => reviewCandidateProfile(profile, experiences), [profile, experiences]);
   const readiness = useMemo(() => getExperienceReadiness(draft), [draft]);
   const currentQuestion = useMemo(() => getNextInterviewQuestion(draft, skippedGoals), [draft, skippedGoals]);
-
+  const sortedCredentials = useMemo(() => sortCredentials(credentials), [credentials]);
+  const topCredentials = useMemo(() => sortedCredentials.filter((item) => (item.assessment?.score || 0) >= 45).slice(0, 3), [sortedCredentials]);
   const selectedExperiences = useMemo(() => {
-    const rankedIds = matches.filter((match) => match.score > 0).slice(0, 3).map((match) => match.experienceId);
+    const rankedIds = matches.filter((item) => item.score > 0).slice(0, 3).map((item) => item.experienceId);
     const ids = rankedIds.length
       ? rankedIds
-      : [...experiences]
-          .sort((a, b) => getExperienceEvidenceStrength(b) - getExperienceEvidenceStrength(a))
-          .slice(0, 3)
-          .map((experience) => experience.id);
-    return ids.map((id) => experiences.find((experience) => experience.id === id)).filter(Boolean) as Experience[];
+      : [...experiences].sort((a, b) => getExperienceEvidenceStrength(b) - getExperienceEvidenceStrength(a)).slice(0, 3).map((item) => item.id);
+    return ids.map((id) => experiences.find((item) => item.id === id)).filter(Boolean) as Experience[];
   }, [matches, experiences]);
 
-  const completion = Math.round(
-    ([profile.name, profile.email, profile.school, profile.major, profile.graduation].filter(Boolean).length / 5) * 40 +
-      (Math.min(experiences.length, 3) / 3) * 40 +
-      (jd.trim() ? 20 : 0),
-  );
+  const completion = Math.min(100, Math.round(
+    ([profile.name, profile.email, profile.school, profile.major, profile.graduation].filter(Boolean).length / 5) * 30 +
+    (Math.min(experiences.length, 3) / 3) * 40 +
+    (Math.min(credentials.length, 2) / 2) * 10 +
+    (jd.trim() ? 20 : 0),
+  ));
 
   function pushConversation(...items: CoachMessage[]) {
     setConversation((current) => [...current, ...items].slice(-12));
@@ -138,51 +208,36 @@ export default function Home() {
     setInterviewAnswer("");
     setSkippedGoals([]);
     setPendingFacts([]);
-    setCoachNote("先用你自己的话写一句经历，我会从最值得追问的地方开始。 ");
-    setConversation([message("coach", "开始下一段经历吧。先告诉我最原始的事实，不需要用简历语言。")]);
+    setConversation([message("coach", "开始下一段经历。用最普通的话告诉我你做过什么就可以。")]);
   }
 
   function saveExperience() {
-    if (!draft.title.trim() || !draft.organization.trim() || !draft.rawDescription.trim()) return;
-    setExperiences((current) => [draft, ...current]);
+    if (!draft.title.trim() || !draft.organization.trim() || !draft.rawDescription.trim() || pendingFacts.length) return;
+    setExperiences((current) => [{ ...draft }, ...current]);
     resetDraft();
-  }
-
-  function removeExperience(id: string) {
-    setExperiences((current) => current.filter((item) => item.id !== id));
   }
 
   async function submitInterviewAnswer() {
     if (!currentQuestion || isAnalyzing) return;
     const answer = interviewAnswer.trim();
     if (!answer) return;
-
     pushConversation(message("user", answer));
-
     if (uncertainAnswers.some((item) => answer.includes(item))) {
       setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
-      const text = "可以，不知道就不编。这一项我先跳过，继续找更能证明你的信息。";
-      setCoachNote(text);
-      pushConversation(message("coach", text));
+      pushConversation(message("coach", "不知道就不编。我先跳过这一项，继续找能被证明的信息。"));
       setInterviewAnswer("");
       return;
     }
-
     setIsAnalyzing(true);
     try {
       const result = await analyzeInterviewWithProvider(answer, draft);
-      const confirmed = applyConfirmedAgentFacts(draft, result.analysis);
-      const needsConfirmation = result.analysis.extractedFacts.filter((fact) => fact.status === "needs_confirmation");
-      setDraft(confirmed);
-      setPendingFacts(needsConfirmation);
+      setDraft(applyConfirmedAgentFacts(draft, result.analysis));
+      const pending = result.analysis.extractedFacts.filter((fact) => fact.status === "needs_confirmation");
+      setPendingFacts(pending);
       setProviderLabel(result.provider === "openai" ? `GPT${result.model ? ` · ${result.model}` : ""}` : "Local");
-
-      const warningText = result.analysis.warnings.length ? ` ${result.analysis.warnings.join(" ")}` : "";
-      const text = needsConfirmation.length
-        ? `${result.analysis.acknowledgement} 其中 ${needsConfirmation.length} 条我不敢直接当事实，需要你确认。${warningText}`
-        : `${result.analysis.acknowledgement} 已确认的信息已经入库。${warningText}`;
-      setCoachNote(text);
-      pushConversation(message("coach", text));
+      pushConversation(message("coach", pending.length
+        ? `${result.analysis.acknowledgement} 有 ${pending.length} 条内容需要你确认后我才会保存。`
+        : `${result.analysis.acknowledgement} 已把能确认的事实写入经历卡。`));
       setInterviewAnswer("");
     } finally {
       setIsAnalyzing(false);
@@ -191,28 +246,11 @@ export default function Home() {
 
   function chooseQuickOption(option: string) {
     if (uncertainAnswers.some((item) => option.includes(item))) {
-      if (!currentQuestion) return;
-      setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
-      const text = "这项没有可靠信息就不写，我会换一个角度继续问。";
-      setCoachNote(text);
-      pushConversation(message("user", option), message("coach", text));
-      setInterviewAnswer("");
+      if (currentQuestion) setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
+      pushConversation(message("user", option), message("coach", "这项没有可靠信息就不写。"));
       return;
     }
     setInterviewAnswer((current) => current.trim() ? `${current}；${option}` : option);
-  }
-
-  function skipCurrentQuestion(reason: "skip" | "unknown") {
-    if (!currentQuestion) return;
-    setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
-    const text = reason === "unknown" ? "记不清没关系，这一项不会被写进简历。" : "已跳过，我不会假设你拥有这项信息。";
-    setCoachNote(text);
-    pushConversation(message("user", reason === "unknown" ? "记不清" : "跳过"), message("coach", text));
-    setInterviewAnswer("");
-  }
-
-  function updatePendingFact(id: string, value: string) {
-    setPendingFacts((current) => current.map((fact) => fact.id === id ? { ...fact, value } : fact));
   }
 
   function confirmPendingFact(id: string) {
@@ -220,208 +258,332 @@ export default function Home() {
     if (!fact?.value.trim()) return;
     setDraft((current) => applyOneFact(current, { ...fact, status: "confirmed", confidence: 1 }));
     setPendingFacts((current) => current.filter((item) => item.id !== id));
-    const text = `已确认并保存：“${fact.value}”。你的修改优先于模型推断。`;
-    setCoachNote(text);
-    pushConversation(message("user", `确认：${fact.value}`), message("coach", text));
+    pushConversation(message("coach", `已确认：“${fact.value}”。`));
   }
 
-  function rejectPendingFact(id: string) {
-    const fact = pendingFacts.find((item) => item.id === id);
-    setPendingFacts((current) => current.filter((item) => item.id !== id));
-    const text = "这条没有进入事实库，后续生成简历也不会使用它。";
-    setCoachNote(text);
-    pushConversation(message("user", `不保存：${fact?.value || "这条信息"}`), message("coach", text));
+  async function analyzeCredential(candidate = credentialDraft) {
+    setCredentialAnalyzing(true);
+    try {
+      const result = await analyzeCredentialWithProvider(candidate);
+      const extracted = result.extracted || {};
+      const next: Credential = {
+        ...candidate,
+        name: candidate.name || extracted.name || "",
+        issuer: candidate.issuer || extracted.issuer || "",
+        date: candidate.date || extracted.date || "",
+        rank: candidate.rank || extracted.rank || "",
+        description: candidate.description || extracted.description || "",
+        type: candidate.type || extracted.type || "award",
+        assessment: result.assessment,
+      };
+      setCredentialDraft(next);
+      setCredentialProvider(result.provider === "openai" ? `GPT${result.model ? ` · ${result.model}` : ""}` : "Local");
+    } finally {
+      setCredentialAnalyzing(false);
+    }
   }
+
+  async function handleCredentialImage(file?: File) {
+    if (!file) return;
+    const imageDataUrl = await fileToCompressedDataUrl(file);
+    const next = { ...credentialDraft, imageDataUrl };
+    setCredentialDraft(next);
+    await analyzeCredential(next);
+  }
+
+  function saveCredential() {
+    if (!credentialDraft.name.trim()) return;
+    const assessment = credentialDraft.assessment || assessCredentialLocally(credentialDraft);
+    setCredentials((current) => [{ ...credentialDraft, assessment }, ...current]);
+    setCredentialDraft(emptyCredential());
+    setCredentialProvider(isRemoteAiConfigured() ? "GPT" : "Local");
+  }
+
+  async function reanalyzeCredentialFollowUp() {
+    if (!credentialDraft.followUpAnswer?.trim()) return;
+    await analyzeCredential(credentialDraft);
+  }
+
+  async function copyWorkspacePrompt() {
+    await navigator.clipboard.writeText(buildWorkspaceImportPrompt());
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  function importWorkspaceResult() {
+    try {
+      const result = parseWorkspaceImport(workspaceImportText);
+      setWorkspaceQuestions(result.questions);
+      if (result.questions.length) {
+        setDraft(result.experience);
+        setPendingFacts([]);
+        setSkippedGoals([]);
+        setConversation([
+          message("coach", `工作区已经提供了大量可验证事实。还剩 ${result.questions.length} 个无法从代码判断的问题，我们只补这些。`),
+          ...result.questions.map((question) => message("coach", question)),
+        ]);
+      } else {
+        setExperiences((current) => [result.experience, ...current]);
+        setWorkspaceImportText("");
+      }
+    } catch (error) {
+      setWorkspaceQuestions([error instanceof Error ? error.message : "无法识别导入内容，请确认粘贴的是完整 CareerVault JSON。"]);
+    }
+  }
+
+  function downloadBackup() {
+    const blob = new Blob([createBackup(vaultState)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `CareerVault-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function restoreBackup(file?: File) {
+    if (!file) return;
+    const restored = parseBackup(await file.text());
+    setProfile(restored.profile);
+    setExperiences(restored.experiences);
+    setCredentials(restored.credentials);
+    setJd(restored.jd);
+    await saveVaultState(restored);
+  }
+
+  async function sendLoginLink() {
+    if (!cloudEmail.trim()) return;
+    setCloudBusy(true);
+    try {
+      await sendMagicLink(cloudEmail.trim());
+      setCloudNote("登录链接已发送到邮箱。打开邮件完成登录后回到这里即可同步。 ");
+    } catch (error) {
+      setCloudNote(error instanceof Error ? error.message : "发送失败");
+    } finally { setCloudBusy(false); }
+  }
+
+  async function refreshCloudUser() {
+    const user = await getCloudUser().catch(() => null);
+    setCloudUserId(user?.id || "");
+    setCloudUserEmail(user?.email || "");
+    setCloudNote(user ? "已检测到登录账号。" : "尚未登录。 ");
+  }
+
+  async function pushCloud() {
+    if (!cloudUserId) return;
+    setCloudBusy(true);
+    try {
+      await saveVaultToCloud(cloudUserId, vaultState);
+      setCloudNote("已同步到云端。换设备登录同一邮箱后可以恢复。 ");
+    } catch (error) { setCloudNote(error instanceof Error ? error.message : "同步失败"); }
+    finally { setCloudBusy(false); }
+  }
+
+  async function pullCloud() {
+    if (!cloudUserId) return;
+    setCloudBusy(true);
+    try {
+      const remote = await loadVaultFromCloud(cloudUserId);
+      if (!remote) { setCloudNote("云端还没有备份。 "); return; }
+      setProfile(remote.profile);
+      setExperiences(remote.experiences);
+      setCredentials(remote.credentials || []);
+      setJd(remote.jd);
+      await saveVaultState(remote);
+      setCloudNote("已从云端恢复到当前设备。 ");
+    } catch (error) { setCloudNote(error instanceof Error ? error.message : "恢复失败"); }
+    finally { setCloudBusy(false); }
+  }
+
+  async function logoutCloud() {
+    await signOutCloud();
+    setCloudUserId("");
+    setCloudUserEmail("");
+    setCloudNote("已退出云同步账号。 ");
+  }
+
+  const nav = [
+    ["overview", Layers3, "总览"],
+    ["profile", UserRound, "个人档案"],
+    ["experiences", BriefcaseBusiness, "经历库"],
+    ["credentials", Award, "奖项证书"],
+    ["job", Target, "岗位匹配"],
+    ["resume", FileText, "一页简历"],
+  ] as const;
 
   return (
-    <main className="shell">
-      <aside className="sidebar">
-        <div>
-          <div className="brandMark">CV</div>
-          <h1>CareerVault</h1>
-          <p className="muted">Professional HR mode.</p>
-        </div>
-        <nav>
-          <button className={tab === "profile" ? "active" : ""} onClick={() => setTab("profile")}>01 个人档案</button>
-          <button className={tab === "experiences" ? "active" : ""} onClick={() => setTab("experiences")}>02 经历库</button>
-          <button className={tab === "job" ? "active" : ""} onClick={() => setTab("job")}>03 岗位匹配</button>
-          <button className={tab === "resume" ? "active" : ""} onClick={() => setTab("resume")}>04 一页简历</button>
-        </nav>
-        <div className="progressCard">
-          <div className="row"><span>档案完整度</span><strong>{completion}%</strong></div>
-          <div className="progress"><span style={{ width: `${completion}%` }} /></div>
-          <small>事实层保存在当前浏览器；AI 只能改表达，不能改事实。</small>
+    <div className="appFrame">
+      <aside className="rail">
+        <div className="brand"><div className="brandIcon"><Layers3 size={18} /></div><div><strong>CareerVault</strong><span>Career memory, refined.</span></div></div>
+        <nav className="navList">{nav.map(([key, Icon, label]) => (
+          <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}><Icon size={17} /><span>{label}</span></button>
+        ))}</nav>
+        <div className="railFooter">
+          <div className="miniStatus"><ShieldCheck size={15} /><span>Local-first</span></div>
+          <p>IndexedDB 自动保存 · 可导出备份</p>
         </div>
       </aside>
 
-      <section className="content">
-        {tab === "profile" && (
-          <section>
-            <div className="eyebrow">PERSONAL PROFILE · HR MODE</div>
-            <h2>先建立 HR 真正会看的基础档案</h2>
-            <p className="lead">默认只收集简历必要信息，不要求年龄、性别、详细住址、身高等低价值或敏感字段。</p>
-            <div className="card formGrid">
-              {([
-                ["name", "姓名"], ["email", "邮箱"], ["phone", "电话"], ["city", "求职城市"],
-                ["school", "学校"], ["major", "专业"], ["degree", "学历"], ["graduation", "毕业时间"],
-              ] as const).map(([key, label]) => (
-                <label key={key}><span>{label}</span><input value={profile[key]} onChange={(e) => setProfile({ ...profile, [key]: e.target.value })} /></label>
-              ))}
+      <main className="workspace">
+        <header className="topbar">
+          <div><span className="kicker">CAREER INTELLIGENCE</span><h1>{profile.name ? `${profile.name} 的 CareerVault` : "CareerVault"}</h1></div>
+          <div className="topActions"><span className="statusPill"><Sparkles size={14} />{providerLabel}</span><span className="statusPill"><Gauge size={14} />{completion}%</span></div>
+        </header>
+
+        {tab === "overview" && (
+          <section className="sectionStack">
+            <div className="heroPanel">
+              <div><span className="eyebrow">YOUR CAREER, AS STRUCTURED EVIDENCE</span><h2>把做过的事，变成可以反复复用的职业资产。</h2><p>经历只整理一次。CareerVault 保存事实、追问缺口，再针对岗位选择最有证明力的内容。</p></div>
+              <button className="button primary" onClick={() => setTab("experiences")}><WandSparkles size={16} />添加经历</button>
             </div>
-            <div className="hrPanel">
-              <div className="sectionTitle"><h3>HR 初筛意见</h3><span>不说空泛好话</span></div>
-              {hrReview.map((item) => (
-                <div className={`reviewItem ${item.type}`} key={item.title}>
-                  <strong>{item.type === "pass" ? "✓" : item.type === "warn" ? "!" : "→"} {item.title}</strong>
-                  <p>{item.detail}</p>
+            <div className="metricGrid">
+              <article className="metricCard"><BriefcaseBusiness size={18} /><strong>{experiences.length}</strong><span>经历资产</span></article>
+              <article className="metricCard"><Award size={18} /><strong>{credentials.length}</strong><span>奖项与证书</span></article>
+              <article className="metricCard"><Target size={18} /><strong>{jd.trim() ? "已设置" : "未设置"}</strong><span>目标岗位</span></article>
+              <article className="metricCard"><ShieldCheck size={18} /><strong>{completion}%</strong><span>职业档案完整度</span></article>
+            </div>
+            <div className="splitGrid">
+              <article className="panel">
+                <div className="panelHeading"><div><span className="eyebrow">NEXT BEST ACTION</span><h3>下一步最值得补什么</h3></div></div>
+                <div className="actionRows">
+                  {!experiences.length && <button onClick={() => setTab("experiences")}><BriefcaseBusiness size={17} /><div><strong>录入第一段经历</strong><span>AI 会从事实开始追问，不要求你先会写简历。</span></div><ChevronRight size={16} /></button>}
+                  {experiences.length > 0 && credentials.length === 0 && <button onClick={() => setTab("credentials")}><Award size={17} /><div><strong>补充奖项或证书</strong><span>上传图片也可以，系统会判断层级、含金量和证明力。</span></div><ChevronRight size={16} /></button>}
+                  {!jd.trim() && <button onClick={() => setTab("job")}><Target size={17} /><div><strong>粘贴一个目标岗位</strong><span>让经历排序从“好看”变成“对这个岗位有用”。</span></div><ChevronRight size={16} /></button>}
+                  {jd.trim() && <button onClick={() => setTab("resume")}><FileText size={17} /><div><strong>查看一页简历</strong><span>只选最相关、最能证明的事实。</span></div><ChevronRight size={16} /></button>}
                 </div>
-              ))}
+              </article>
+              <article className="panel dataPanel">
+                <div className="panelHeading"><div><span className="eyebrow">DATA SAFETY</span><h3>你的记录现在存在哪里</h3></div><Database size={20} /></div>
+                <div className="safetyLine"><CheckCircle2 size={16} /><div><strong>当前设备：IndexedDB</strong><span>关闭浏览器后仍会保留；比 localStorage 更适合保存结构化数据和图片。</span></div></div>
+                <div className="safetyLine"><CircleAlert size={16} /><div><strong>但它不是账号云盘</strong><span>清理网站数据、换浏览器或换设备仍可能丢失，所以建议定期备份或启用云同步。</span></div></div>
+                <div className="buttonRow"><button className="button secondary" onClick={downloadBackup}><Download size={15} />导出备份</button><label className="button secondary fileButton"><Upload size={15} />恢复备份<input type="file" accept="application/json,.json" onChange={(e) => restoreBackup(e.target.files?.[0])} /></label></div>
+              </article>
             </div>
-            <div className="actions"><button className="primary" onClick={() => setTab("experiences")}>继续建立经历库 →</button></div>
+
+            <article className="panel cloudPanel">
+              <div className="panelHeading"><div><span className="eyebrow">OPTIONAL CLOUD SYNC</span><h3>跨设备同步</h3></div>{isCloudConfigured() ? <Cloud size={20} /> : <CloudOff size={20} />}</div>
+              {!isCloudConfigured() ? (
+                <p className="subtle">云同步代码已经准备好，但当前部署还没有配置 Supabase。未配置时不影响本地使用和备份。</p>
+              ) : cloudUserId ? (
+                <div className="cloudControls"><div><strong>{cloudUserEmail}</strong><span>已连接云端账号</span></div><div className="buttonRow"><button className="button secondary" disabled={cloudBusy} onClick={pushCloud}><Cloud size={15} />同步到云端</button><button className="button secondary" disabled={cloudBusy} onClick={pullCloud}><RefreshCw size={15} />从云端恢复</button><button className="iconButton" onClick={logoutCloud} aria-label="退出云端账号"><LogOut size={16} /></button></div></div>
+              ) : (
+                <div className="cloudControls"><input value={cloudEmail} onChange={(e) => setCloudEmail(e.target.value)} placeholder="输入邮箱，接收免密码登录链接" /><div className="buttonRow"><button className="button primary" disabled={cloudBusy || !cloudEmail.trim()} onClick={sendLoginLink}>发送登录链接</button><button className="button secondary" onClick={refreshCloudUser}><RefreshCw size={15} />检查登录状态</button></div></div>
+              )}
+              {cloudNote && <p className="inlineNote">{cloudNote}</p>}
+            </article>
+          </section>
+        )}
+
+        {tab === "profile" && (
+          <section className="sectionStack narrow">
+            <div className="sectionIntro"><span className="eyebrow">PERSONAL PROFILE</span><h2>只保留 HR 真正需要的基础信息</h2><p>默认不要求年龄、性别、详细住址、身高等低价值或敏感字段。</p></div>
+            <article className="panel formPanel"><div className="formGrid">{([
+              ["name", "姓名"], ["email", "邮箱"], ["phone", "电话"], ["city", "求职城市"], ["school", "学校"], ["major", "专业"], ["degree", "学历"], ["graduation", "毕业时间"],
+            ] as const).map(([key, label]) => <label key={key}><span>{label}</span><input value={profile[key]} onChange={(e) => setProfile({ ...profile, [key]: e.target.value })} /></label>)}</div></article>
+            <article className="panel"><div className="panelHeading"><div><span className="eyebrow">HR SCREENING</span><h3>初筛意见</h3></div></div><div className="reviewList">{hrReview.map((item) => <div className="reviewRow" key={item.title}>{item.type === "pass" ? <CheckCircle2 size={17} /> : <CircleAlert size={17} />}<div><strong>{item.title}</strong><span>{item.detail}</span></div></div>)}</div></article>
           </section>
         )}
 
         {tab === "experiences" && (
-          <section>
-            <div className="eyebrow">EXPERIENCE VAULT · AI CAREER COACH</div>
-            <h2>你负责回忆事实，CareerVault 负责把价值问出来</h2>
-            <p className="lead">不需要懂 STAR，也不用先学会写简历。先告诉我“你做过什么”，顾问一次只追问一个最值得补充的问题。</p>
+          <section className="sectionStack">
+            <div className="sectionIntro"><span className="eyebrow">EXPERIENCE VAULT</span><h2>先说事实，简历语言交给专业 HR 规则。</h2><p>手动采访适合实习、校园和非代码经历；Vibe Coding 项目可以直接让原工作区生成可导入事实，省掉重复追问。</p></div>
 
-            <div className="twoCol interviewLayout">
-              <div className="card">
-                <div className="sectionTitle"><h3>① 先告诉我这是什么经历</h3><span>不用写得像简历</span></div>
-                <div className="formGrid compact">
-                  <label><span>经历类型</span><select value={draft.type} onChange={(e) => { setDraft({ ...draft, type: e.target.value as ExperienceType }); setSkippedGoals([]); setPendingFacts([]); }}>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                  <label><span>岗位 / 项目名称</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label>
+            <article className="panel workspaceImport">
+              <div className="panelHeading"><div><span className="eyebrow">WORKSPACE IMPORT</span><h3>Vibe Coding / AI Coding 项目一键提取</h3><p>让真正看得到仓库和 Git 历史的 AI 帮你整理事实，CareerVault 只补工作区无法判断的问题。</p></div><FolderGit2 size={20} /></div>
+              <div className="buttonRow"><button className="button primary" onClick={copyWorkspacePrompt}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "已复制" : "复制工作区 Prompt"}</button></div>
+              <textarea rows={6} value={workspaceImportText} onChange={(e) => setWorkspaceImportText(e.target.value)} placeholder="把工作区返回的 CAREERVAULT_IMPORT_V1 JSON 粘贴到这里…" />
+              <div className="buttonRow"><button className="button secondary" disabled={!workspaceImportText.trim()} onClick={importWorkspaceResult}><FileJson size={15} />解析并导入</button></div>
+              {workspaceQuestions.length > 0 && <div className="questionNotice"><CircleAlert size={16} /><div><strong>还有这些事实无法从工作区确认</strong>{workspaceQuestions.map((q) => <span key={q}>{q}</span>)}</div></div>}
+            </article>
+
+            <div className="interviewGrid">
+              <article className="panel formPanel">
+                <div className="panelHeading"><div><span className="eyebrow">NEW EXPERIENCE</span><h3>经历基础信息</h3></div></div>
+                <div className="formGrid">
+                  <label><span>类型</span><select value={draft.type} onChange={(e) => { setDraft({ ...draft, type: e.target.value as ExperienceType }); setSkippedGoals([]); }}>{Object.entries(experienceLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label><span>岗位 / 项目</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label>
                   <label><span>公司 / 组织</span><input value={draft.organization} onChange={(e) => setDraft({ ...draft, organization: e.target.value })} /></label>
-                  <label><span>开始时间</span><input type="month" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} /></label>
-                  <label><span>结束时间</span><input type="month" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} /></label>
+                  <label><span>开始</span><input type="month" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} /></label>
+                  <label><span>结束</span><input type="month" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} /></label>
                 </div>
-                <label><span>用自己的话说你做了什么</span><textarea rows={4} value={draft.rawDescription} onChange={(e) => setDraft({ ...draft, rawDescription: e.target.value })} placeholder="例如：暑假在机械部门实习，主要检查 CAD 图纸，有时也帮忙改图。" /></label>
+                <label><span>用自己的话说你做了什么</span><textarea rows={5} value={draft.rawDescription} onChange={(e) => setDraft({ ...draft, rawDescription: e.target.value })} placeholder="例如：暑假在机械部门实习，主要检查 CAD 图纸，有时也帮忙改图。" /></label>
+                <details className="details"><summary>查看 / 手动修改已提取事实</summary><label><span>具体动作</span><textarea rows={3} value={draft.actions} onChange={(e) => setDraft({ ...draft, actions: e.target.value })} /></label><label><span>工具 / 技术</span><input value={draft.tools} onChange={(e) => setDraft({ ...draft, tools: e.target.value })} /></label><label><span>结果 / 交付</span><textarea rows={3} value={draft.outcomes} onChange={(e) => setDraft({ ...draft, outcomes: e.target.value })} /></label><label><span>已确认事实（每行一条）</span><textarea rows={4} value={draft.verifiedFacts.join("\n")} onChange={(e) => setDraft({ ...draft, verifiedFacts: e.target.value.split("\n").map((line) => line.trim()).filter(Boolean) })} /></label></details>
+              </article>
 
-                <details className="manualEdit">
-                  <summary>高级编辑：直接查看/修改已提取事实</summary>
-                  <label><span>具体动作</span><textarea rows={3} value={draft.actions} onChange={(e) => setDraft({ ...draft, actions: e.target.value })} /></label>
-                  <label><span>工具 / 技术 / 方法</span><input value={draft.tools} onChange={(e) => setDraft({ ...draft, tools: e.target.value })} /></label>
-                  <label><span>结果 / 交付</span><textarea rows={3} value={draft.outcomes} onChange={(e) => setDraft({ ...draft, outcomes: e.target.value })} /></label>
-                  <label><span>已确认事实（每行一条）</span><textarea rows={4} value={draft.verifiedFacts.join("\n")} onChange={(e) => setDraft({ ...draft, verifiedFacts: e.target.value.split("\n").map((line) => line.trim()).filter(Boolean) })} /></label>
-                </details>
-              </div>
-
-              <div className="coachColumn">
-                <div className="coachCard">
-                  <div className="coachHeader">
-                    <div><span className="coachAvatar">HR</span><div><strong>CareerVault 简历顾问</strong><small>聊天体验 · 压缩上下文 · {providerLabel}</small></div></div>
-                    <span className={`readinessBadge ${readiness.score >= 60 ? "ready" : ""}`}>{readiness.score}% · {readiness.label}</span>
-                  </div>
-
-                  <div className="readinessBar"><span style={{ width: `${readiness.score}%` }} /></div>
-                  <div className="readinessGrid">
-                    {readiness.items.map((item) => <span className={item.complete ? "done" : ""} key={item.key}>{item.complete ? "✓" : "○"} {item.label}</span>)}
-                  </div>
-
-                  <div className="coachMessage">{coachNote}</div>
-                  <CoachTranscript messages={conversation} />
-
-                  {!draft.rawDescription.trim() ? (
-                    <div className="coachEmpty">先在左边写一句最原始的经历描述。哪怕只有“负责公众号运营”也可以。</div>
-                  ) : pendingFacts.length > 0 ? (
-                    <div className="confirmationPanel">
-                      <div className="confirmationIntro"><strong>先确认这 {pendingFacts.length} 条信息</strong><p>这些内容包含模糊数字、语义推断或低置信度归类。只有你确认后才会进入事实库。</p></div>
-                      {pendingFacts.map((fact) => (
-                        <div className="factConfirmCard" key={fact.id}>
-                          <div className="factMeta"><span>{fact.goal}</span><span>{Math.round(fact.confidence * 100)}% confidence</span></div>
-                          <textarea rows={2} value={fact.value} onChange={(e) => updatePendingFact(fact.id, e.target.value)} />
-                          <p>{fact.reason}</p>
-                          <div className="coachActions">
-                            <button className="primary" onClick={() => confirmPendingFact(fact.id)}>确认保存</button>
-                            <button className="ghost" onClick={() => rejectPendingFact(fact.id)}>不保存</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : currentQuestion ? (
-                    <div className="questionBlock">
-                      <span className="questionGoal">当前追问 · {currentQuestion.goal}</span>
-                      <h3>{currentQuestion.question}</h3>
-                      {currentQuestion.options.length > 0 && (
-                        <div className="quickOptions">
-                          {currentQuestion.options.map((option) => <button key={option} onClick={() => chooseQuickOption(option)}>{option}</button>)}
-                        </div>
-                      )}
-                      <textarea rows={3} value={interviewAnswer} onChange={(e) => setInterviewAnswer(e.target.value)} placeholder={currentQuestion.placeholder} />
-                      <div className="coachActions">
-                        <button className="primary" disabled={!interviewAnswer.trim() || isAnalyzing} onClick={submitInterviewAnswer}>{isAnalyzing ? "HR 正在分析…" : "回答并继续 →"}</button>
-                        <button className="ghost" disabled={isAnalyzing} onClick={() => skipCurrentQuestion("unknown")}>记不清</button>
-                        <button className="ghost" disabled={isAnalyzing} onClick={() => skipCurrentQuestion("skip")}>跳过</button>
-                      </div>
-                      <div className="whyAsk"><strong>为什么问这个？</strong><p>{currentQuestion.why}</p></div>
-                    </div>
-                  ) : (
-                    <div className="coachComplete">
-                      <strong>这段经历目前已经可以用于生成简历。</strong>
-                      <p>你可以直接保存；如果高级编辑里还有想补的事实，也可以继续补充。CareerVault 不会因为缺少某个数字而自动编造。</p>
-                    </div>
-                  )}
-
-                  <button className="primary full saveExperience" disabled={!draft.title.trim() || !draft.organization.trim() || !draft.rawDescription.trim() || pendingFacts.length > 0} onClick={saveExperience}>保存这段经历</button>
-                </div>
-              </div>
+              <article className="panel coachPanel">
+                <div className="coachTop"><div><span className="coachMark"><BriefcaseBusiness size={16} /></span><div><strong>CareerVault HR Coach</strong><span>{providerLabel} · 一次只问一个问题</span></div></div><div className="readiness">{readiness.score}%</div></div>
+                <div className="progressTrack"><span style={{ width: `${readiness.score}%` }} /></div>
+                <CoachTranscript messages={conversation} />
+                {!draft.rawDescription.trim() ? <div className="emptyState">先在左侧写一句最原始的经历描述。</div> : pendingFacts.length ? (
+                  <div className="pendingList"><div className="questionNotice"><ShieldCheck size={16} /><div><strong>这些内容不会自动进入事实库</strong><span>请确认或修改后再保存。</span></div></div>{pendingFacts.map((fact) => <div className="pendingCard" key={fact.id}><div className="pendingMeta"><span>{fact.goal}</span><span>{Math.round(fact.confidence * 100)}%</span></div><textarea rows={2} value={fact.value} onChange={(e) => setPendingFacts((current) => current.map((item) => item.id === fact.id ? { ...item, value: e.target.value } : item))} /><p>{fact.reason}</p><div className="buttonRow"><button className="button primary small" onClick={() => confirmPendingFact(fact.id)}><Check size={14} />确认</button><button className="button tertiary small" onClick={() => setPendingFacts((current) => current.filter((item) => item.id !== fact.id))}>不保存</button></div></div>)}</div>
+                ) : currentQuestion ? (
+                  <div className="questionBlock"><span className="eyebrow">NEXT QUESTION · {currentQuestion.goal}</span><h3>{currentQuestion.question}</h3>{currentQuestion.options.length > 0 && <div className="optionRow">{currentQuestion.options.map((option) => <button key={option} onClick={() => chooseQuickOption(option)}>{option}</button>)}</div>}<textarea rows={3} value={interviewAnswer} onChange={(e) => setInterviewAnswer(e.target.value)} placeholder={currentQuestion.placeholder} /><div className="buttonRow"><button className="button primary" disabled={!interviewAnswer.trim() || isAnalyzing} onClick={submitInterviewAnswer}>{isAnalyzing ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}{isAnalyzing ? "分析中" : "回答并继续"}</button><button className="button tertiary" onClick={() => { if (currentQuestion) setSkippedGoals((c) => Array.from(new Set([...c, currentQuestion.goal]))); }}>跳过</button></div><p className="whyText">为什么问：{currentQuestion.why}</p></div>
+                ) : <div className="successState"><CheckCircle2 size={20} /><div><strong>这段经历已达到可用状态</strong><span>可以保存，也可以继续手动补充。</span></div></div>}
+                <button className="button primary full" disabled={!draft.title.trim() || !draft.organization.trim() || !draft.rawDescription.trim() || pendingFacts.length > 0} onClick={saveExperience}>保存到经历库</button>
+              </article>
             </div>
 
-            <div className="vaultSection">
-              <div className="sectionTitle"><h3>② 我的经历库</h3><span>{experiences.length} 条</span></div>
-              {experiences.length === 0 ? <div className="empty">还没有经历。先完成上面的第一段采访。没有实习也可以录入项目、比赛、科研、课程设计或校园经历。</div> : (
-                <div className="experienceGrid">{experiences.map((experience) => {
-                  const itemReadiness = getExperienceReadiness(experience);
-                  return <article className="experienceCard" key={experience.id}>
-                    <div className="row"><span className="tag">{labels[experience.type]}</span><span className="evidence">完整度 {itemReadiness.score}% · {itemReadiness.label}</span><button className="textButton" onClick={() => removeExperience(experience.id)}>删除</button></div>
-                    <h4>{experience.title}</h4><p>{experience.organization} · {experience.startDate || "?"} — {experience.endDate || "至今"}</p>
-                    <p>{experience.rawDescription}</p>
-                    {experience.actions && <p><strong>动作：</strong>{experience.actions}</p>}
-                    {experience.verifiedFacts.length > 0 && <div className="facts">{experience.verifiedFacts.map((fact) => <span key={fact}>✓ {fact}</span>)}</div>}
-                  </article>;
-                })}</div>
-              )}
+            <div className="libraryHeader"><div><span className="eyebrow">LIBRARY</span><h3>我的经历</h3></div><span>{experiences.length} 条</span></div>
+            {experiences.length === 0 ? <div className="emptyState panel">还没有经历。没有实习也没关系，项目、比赛、课程设计和校园经历都可以成为证据。</div> : <div className="cardGrid">{experiences.map((item) => { const r = getExperienceReadiness(item); return <article className="assetCard" key={item.id}><div className="assetTop"><span className="softTag">{experienceLabels[item.type]}</span><button className="iconButton" onClick={() => setExperiences((current) => current.filter((x) => x.id !== item.id))} aria-label="删除经历"><Trash2 size={15} /></button></div><h4>{item.title}</h4><span className="metaLine">{item.organization} · {item.startDate || "?"} — {item.endDate || "至今"}</span><p>{item.rawDescription}</p><div className="assetFooter"><span>完整度 {r.score}%</span>{item.source === "workspace" && <span><FolderGit2 size={13} />工作区导入</span>}</div></article>; })}</div>}
+          </section>
+        )}
+
+        {tab === "credentials" && (
+          <section className="sectionStack">
+            <div className="sectionIntro"><span className="eyebrow">CREDENTIALS</span><h2>奖项和证书不是越多越好，重要的是它到底证明什么。</h2><p>可以上传奖状/证书图片，也可以手动输入。系统会判断层级、主办方、名次与筛选性；信息不足时会继续追问。</p></div>
+            <div className="splitGrid credentialGrid">
+              <article className="panel formPanel">
+                <div className="uploadZone"><ImagePlus size={22} /><div><strong>上传奖状 / 证书图片</strong><span>图片会先在浏览器压缩，再发送给 AI 识别；原图不会写入 GitHub。</span></div><label className="button secondary fileButton"><Upload size={15} />选择图片<input type="file" accept="image/*" onChange={(e) => handleCredentialImage(e.target.files?.[0])} /></label></div>
+                {credentialDraft.imageDataUrl && <img className="credentialPreview" src={credentialDraft.imageDataUrl} alt="奖项或证书预览" />}
+                <div className="formGrid">
+                  <label><span>类型</span><select value={credentialDraft.type} onChange={(e) => setCredentialDraft({ ...credentialDraft, type: e.target.value as CredentialType })}>{Object.entries(credentialLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label><span>名称</span><input value={credentialDraft.name} onChange={(e) => setCredentialDraft({ ...credentialDraft, name: e.target.value })} /></label>
+                  <label><span>颁发 / 主办方</span><input value={credentialDraft.issuer} onChange={(e) => setCredentialDraft({ ...credentialDraft, issuer: e.target.value })} /></label>
+                  <label><span>日期</span><input type="month" value={credentialDraft.date} onChange={(e) => setCredentialDraft({ ...credentialDraft, date: e.target.value })} /></label>
+                  <label><span>奖级 / 名次 / 等级</span><input value={credentialDraft.rank} onChange={(e) => setCredentialDraft({ ...credentialDraft, rank: e.target.value })} placeholder="一等奖 / Top 10% / 认证通过…" /></label>
+                </div>
+                <label><span>你为什么获得它 / 它对应了什么实际成果</span><textarea rows={4} value={credentialDraft.description} onChange={(e) => setCredentialDraft({ ...credentialDraft, description: e.target.value })} placeholder="例如：负责比赛中的控制模块，实现…；或通过某项认证考试。" /></label>
+                <div className="buttonRow"><button className="button secondary" disabled={credentialAnalyzing || (!credentialDraft.name.trim() && !credentialDraft.imageDataUrl)} onClick={() => analyzeCredential()}>{credentialAnalyzing ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}{credentialAnalyzing ? "判断中" : "重新判断"}</button><button className="button primary" disabled={!credentialDraft.name.trim()} onClick={saveCredential}>保存证书 / 奖项</button></div>
+              </article>
+
+              <article className="panel assessmentPanel">
+                <div className="panelHeading"><div><span className="eyebrow">CREDENTIAL REVIEW</span><h3>专业判断</h3></div><span className="statusPill"><Sparkles size={14} />{credentialProvider}</span></div>
+                {!credentialDraft.assessment ? <div className="emptyState">上传图片或填写基本信息后，CareerVault 会判断它在简历中的价值。</div> : <>
+                  <div className="credentialScore"><strong>{credentialDraft.assessment.score}</strong><div><span>{credentialDraft.assessment.tier}</span><small>{credentialLevelLabel(credentialDraft.assessment.level)}</small></div></div>
+                  <div className="rationaleList">{credentialDraft.assessment.rationale.map((reason) => <div key={reason}><Check size={14} /><span>{reason}</span></div>)}</div>
+                  <div className="proofBox"><span className="eyebrow">WHAT IT PROVES</span><p>{credentialDraft.assessment.whatItProves}</p></div>
+                  {credentialDraft.assessment.followUpQuestion && <div className="followUp"><CircleAlert size={17} /><div><strong>还缺一个关键事实</strong><p>{credentialDraft.assessment.followUpQuestion}</p><textarea rows={3} value={credentialDraft.followUpAnswer || ""} onChange={(e) => setCredentialDraft({ ...credentialDraft, followUpAnswer: e.target.value })} placeholder="用自己的话回答即可…" /><button className="button secondary small" disabled={!credentialDraft.followUpAnswer?.trim() || credentialAnalyzing} onClick={reanalyzeCredentialFollowUp}>补充后重新判断</button></div></div>}
+                </>}
+              </article>
             </div>
+
+            <div className="libraryHeader"><div><span className="eyebrow">CREDENTIAL VAULT</span><h3>已保存</h3></div><span>{credentials.length} 项</span></div>
+            {credentials.length === 0 ? <div className="emptyState panel">还没有保存的奖项或证书。</div> : <div className="cardGrid">{sortedCredentials.map((item) => <article className="assetCard credentialCard" key={item.id}>{item.imageDataUrl && <img src={item.imageDataUrl} alt="证书缩略图" />}<div className="assetTop"><span className="softTag">{credentialLabels[item.type]}</span><button className="iconButton" onClick={() => setCredentials((current) => current.filter((x) => x.id !== item.id))}><Trash2 size={15} /></button></div><h4>{item.name}</h4><span className="metaLine">{item.issuer || "未知颁发方"}{item.rank ? ` · ${item.rank}` : ""}</span>{item.assessment && <div className="credentialMiniScore"><strong>{item.assessment.score}</strong><span>{item.assessment.tier} · {credentialLevelLabel(item.assessment.level)}</span></div>}<p>{item.assessment?.whatItProves || item.description}</p></article>)}</div>}
           </section>
         )}
 
         {tab === "job" && (
-          <section>
-            <div className="eyebrow">JOB MATCH · EVIDENCE FIRST</div>
-            <h2>岗位要求决定选材，不把所有经历都塞进去</h2>
-            <p className="lead">匹配分数不是“ATS 玄学分”。它综合 JD 关键词覆盖与经历证据强度，用来判断哪段经历最值得写。</p>
-            <div className="card"><label><span>岗位 JD</span><textarea rows={12} value={jd} onChange={(e) => setJd(e.target.value)} placeholder="粘贴岗位职责与任职要求..." /></label></div>
-            <div className="matchList">
-              {matches.map((match) => {
-                const experience = experiences.find((item) => item.id === match.experienceId);
-                if (!experience) return null;
-                return <div className="matchCard" key={match.experienceId}><div><strong>{experience.title}</strong><p>{experience.organization} · 证据强度 {getExperienceEvidenceStrength(experience)}</p><div className="keywords">{match.matchedKeywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div></div><div className="score">{match.score}<small>%</small><em>岗位覆盖</em></div></div>;
-              })}
-            </div>
-            <div className="actions"><button className="primary" disabled={!experiences.length} onClick={() => setTab("resume")}>按 HR 规则生成一页简历 →</button></div>
+          <section className="sectionStack narrow">
+            <div className="sectionIntro"><span className="eyebrow">TARGET ROLE</span><h2>岗位要求决定选材，而不是把人生全部塞进一页。</h2><p>这里的分数是证据覆盖，不是“ATS 玄学分”。</p></div>
+            <article className="panel"><label><span>岗位 JD</span><textarea rows={14} value={jd} onChange={(e) => setJd(e.target.value)} placeholder="粘贴岗位职责与任职要求…" /></label></article>
+            <div className="matchList">{matches.map((match) => { const item = experiences.find((x) => x.id === match.experienceId); if (!item) return null; return <article className="matchCard" key={match.experienceId}><div><span className="softTag">{experienceLabels[item.type]}</span><h4>{item.title}</h4><span className="metaLine">{item.organization} · 证据强度 {getExperienceEvidenceStrength(item)}</span><div className="chipRow">{match.matchedKeywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div></div><div className="matchScore"><strong>{match.score}</strong><span>% 覆盖</span></div></article>; })}</div>
           </section>
         )}
 
         {tab === "resume" && (
-          <section>
-            <div className="eyebrow">ONE-PAGE RESUME · HR REVIEWED</div>
-            <h2>一页简历，不靠堆字取胜</h2>
-            <p className="lead">默认上下结构、低饱和、教育背景简洁、经历按岗位价值排序。每条经历都解释为什么这样写。</p>
-            <div className="ruleStrip">{HR_RULES.filter((rule) => rule.level === "must").slice(0, 5).map((rule) => <span key={rule.id}>✓ {rule.title}</span>)}</div>
+          <section className="sectionStack">
+            <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME</span><h2>克制、清楚、可追问。</h2><p>所有表述都应能追溯到经历库事实。奖项只保留含金量和岗位价值足够的项目。</p></div>
+            <div className="ruleBar">{HR_RULES.filter((rule) => rule.level === "must").slice(0, 4).map((rule) => <span key={rule.id}><Check size={13} />{rule.title}</span>)}</div>
             <article className="resumeSheet">
-              <header><h3>{profile.name || "你的姓名"}</h3><p>{[profile.email, profile.phone, profile.city].filter(Boolean).join(" · ") || "邮箱 · 电话 · 求职城市"}</p></header>
-              <section><h4>教育背景</h4><div className="resumeLine"><strong>{profile.school || "学校"}</strong><span>{profile.graduation || "毕业时间"}</span></div><p>{[profile.major, profile.degree].filter(Boolean).join(" · ") || "专业 · 学历"}</p></section>
-              <section><h4>职业概述</h4><p>{buildSummary(profile, experiences)}</p></section>
-              <section><h4>相关经历</h4>{selectedExperiences.length === 0 ? <p className="muted">请先添加经历。</p> : selectedExperiences.map((experience) => {
-                const bullet = buildProfessionalResumeBullet(experience);
-                return <div className="resumeExperience" key={experience.id}><div className="resumeLine"><strong>{experience.title} · {experience.organization}</strong><span>{experience.startDate} — {experience.endDate || "至今"}</span></div><p>• {bullet.text}</p><div className="whyBox"><strong>HR 为什么这样写</strong>{bullet.reasons.map((reason) => <span key={reason}>✓ {reason}</span>)}{bullet.warnings.map((warning) => <span className="warning" key={warning}>! {warning}</span>)}</div></div>;
-              })}</section>
+              <header><div><h2>{profile.name || "你的姓名"}</h2><p>{[profile.email, profile.phone, profile.city].filter(Boolean).join(" · ") || "邮箱 · 电话 · 求职城市"}</p></div></header>
+              <section><h3>教育背景</h3><div className="resumeLine"><strong>{profile.school || "学校"}</strong><span>{profile.graduation || "毕业时间"}</span></div><p>{[profile.major, profile.degree].filter(Boolean).join(" · ") || "专业 · 学历"}</p></section>
+              <section><h3>职业概述</h3><p>{buildSummary(profile, experiences)}</p></section>
+              <section><h3>相关经历</h3>{selectedExperiences.length ? selectedExperiences.map((item) => { const bullet = buildProfessionalResumeBullet(item); return <div className="resumeExperience" key={item.id}><div className="resumeLine"><strong>{item.title} · {item.organization}</strong><span>{item.startDate} — {item.endDate || "至今"}</span></div><p>• {bullet.text}</p></div>; }) : <p className="muted">请先添加经历。</p>}</section>
+              {topCredentials.length > 0 && <section><h3>奖项 / 证书</h3>{topCredentials.map((item) => <div className="resumeCredential" key={item.id}><div className="resumeLine"><strong>{item.name}{item.rank ? ` · ${item.rank}` : ""}</strong><span>{item.date}</span></div><p>{item.issuer}{item.assessment?.whatItProves && item.assessment.whatItProves !== "尚不足以判断它具体证明了哪项能力" ? ` · ${item.assessment.whatItProves}` : ""}</p></div>)}</section>}
             </article>
           </section>
         )}
-      </section>
-    </main>
+      </main>
+    </div>
   );
 }
