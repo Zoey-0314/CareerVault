@@ -31,6 +31,7 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { CoachTranscript, type CoachMessage } from "@/components/CoachTranscript";
+import { ResumePanel } from "@/components/ResumePanel";
 import { analyzeCredentialWithProvider, analyzeInterviewWithProvider, isRemoteAiConfigured } from "@/lib/aiClient";
 import { getCloudUser, isCloudConfigured, loadVaultFromCloud, saveVaultToCloud, sendMagicLink, signOutCloud } from "@/lib/cloud";
 import { assessCredentialLocally, credentialLevelLabel, sortCredentials } from "@/lib/credentials";
@@ -567,22 +568,11 @@ export default function Home() {
             <div className="sectionIntro"><span className="eyebrow">TARGET ROLE</span><h2>岗位要求决定选材，而不是把人生全部塞进一页。</h2><p>这里的分数是证据覆盖，不是“ATS 玄学分”。</p></div>
             <article className="panel"><label><span>岗位 JD</span><textarea rows={14} value={jd} onChange={(e) => setJd(e.target.value)} placeholder="粘贴岗位职责与任职要求…" /></label></article>
             <div className="matchList">{matches.map((match) => { const item = experiences.find((x) => x.id === match.experienceId); if (!item) return null; return <article className="matchCard" key={match.experienceId}><div><span className="softTag">{experienceLabels[item.type]}</span><h4>{item.title}</h4><span className="metaLine">{item.organization} · 证据强度 {getExperienceEvidenceStrength(item)}</span><div className="chipRow">{match.matchedKeywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div></div><div className="matchScore"><strong>{match.score}</strong><span>% 覆盖</span></div></article>; })}</div>
+            {jd.trim() && <div className="buttonRow"><button className="button primary" onClick={() => setTab("resume")}><FileText size={15} />生成该岗位的一页简历</button></div>}
           </section>
         )}
 
-        {tab === "resume" && (
-          <section className="sectionStack">
-            <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME</span><h2>克制、清楚、可追问。</h2><p>所有表述都应能追溯到经历库事实。奖项只保留含金量和岗位价值足够的项目。</p></div>
-            <div className="ruleBar">{HR_RULES.filter((rule) => rule.level === "must").slice(0, 4).map((rule) => <span key={rule.id}><Check size={13} />{rule.title}</span>)}</div>
-            <article className="resumeSheet">
-              <header><div><h2>{profile.name || "你的姓名"}</h2><p>{[profile.email, profile.phone, profile.city].filter(Boolean).join(" · ") || "邮箱 · 电话 · 求职城市"}</p></div></header>
-              <section><h3>教育背景</h3><div className="resumeLine"><strong>{profile.school || "学校"}</strong><span>{profile.graduation || "毕业时间"}</span></div><p>{[profile.major, profile.degree].filter(Boolean).join(" · ") || "专业 · 学历"}</p></section>
-              <section><h3>职业概述</h3><p>{buildSummary(profile, experiences)}</p></section>
-              <section><h3>相关经历</h3>{selectedExperiences.length ? selectedExperiences.map((item) => { const bullet = buildProfessionalResumeBullet(item); return <div className="resumeExperience" key={item.id}><div className="resumeLine"><strong>{item.title} · {item.organization}</strong><span>{item.startDate} — {item.endDate || "至今"}</span></div><p>• {bullet.text}</p></div>; }) : <p className="muted">请先添加经历。</p>}</section>
-              {topCredentials.length > 0 && <section><h3>奖项 / 证书</h3>{topCredentials.map((item) => <div className="resumeCredential" key={item.id}><div className="resumeLine"><strong>{item.name}{item.rank ? ` · ${item.rank}` : ""}</strong><span>{item.date}</span></div><p>{item.issuer}{item.assessment?.whatItProves && item.assessment.whatItProves !== "尚不足以判断它具体证明了哪项能力" ? ` · ${item.assessment.whatItProves}` : ""}</p></div>)}</section>}
-            </article>
-          </section>
-        )}
+        {tab === "resume" && <ResumePanel profile={profile} jd={jd} experiences={experiences} matches={matches} credentials={credentials} onGoToJob={() => setTab("job")} />}
       </main>
     </div>
   );
