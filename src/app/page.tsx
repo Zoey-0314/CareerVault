@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { analyzeInterviewWithProvider, isRemoteAiConfigured } from "@/lib/aiClient";
+import { applyConfirmedAgentFacts, type ExtractedFact } from "@/lib/interviewAgent";
 import { matchExperiences } from "@/lib/matching";
 import { buildProfessionalResumeBullet, buildSummary } from "@/lib/resume";
 import { getExperienceEvidenceStrength, HR_RULES, reviewCandidateProfile } from "@/lib/hrRules";
 import {
-  applyInterviewAnswer,
   getExperienceReadiness,
   getNextInterviewQuestion,
   type InterviewGoal,
@@ -43,6 +44,22 @@ const labels: Record<ExperienceType, string> = {
 
 const uncertainAnswers = ["不知道", "记不清", "没有统计", "不适用", "暂时没有明确结果", "暂时没有", "其他/不适用"];
 
+function mergeText(existing: string, value: string): string {
+  const next = value.trim();
+  if (!next) return existing;
+  if (!existing.trim()) return next;
+  if (existing.includes(next)) return existing;
+  return `${existing}；${next}`;
+}
+
+function applyOneFact(experience: Experience, fact: ExtractedFact): Experience {
+  if (fact.target === "actions") return { ...experience, actions: mergeText(experience.actions, fact.value) };
+  if (fact.target === "tools") return { ...experience, tools: mergeText(experience.tools, fact.value) };
+  if (fact.target === "outcomes") return { ...experience, outcomes: mergeText(experience.outcomes, fact.value) };
+  if (experience.verifiedFacts.includes(fact.value)) return experience;
+  return { ...experience, verifiedFacts: [...experience.verifiedFacts, fact.value] };
+}
+
 export default function Home() {
   const [tab, setTab] = useState<"profile" | "experiences" | "job" | "resume">("profile");
   const [profile, setProfile] = useState<Profile>(emptyProfile);
@@ -53,6 +70,9 @@ export default function Home() {
   const [interviewAnswer, setInterviewAnswer] = useState("");
   const [skippedGoals, setSkippedGoals] = useState<InterviewGoal[]>([]);
   const [coachNote, setCoachNote] = useState("先用你自己的话写一句经历，我会从最值得追问的地方开始。 ");
+  const [pendingFacts, setPendingFacts] = useState<ExtractedFact[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [providerLabel, setProviderLabel] = useState("Local");
 
   useEffect(() => {
     const saved = localStorage.getItem("careervault-v1");
@@ -66,6 +86,7 @@ export default function Home() {
         // Ignore malformed local demo data.
       }
     }
+    setProviderLabel(isRemoteAiConfigured() ? "GPT" : "Local");
     setHydrated(true);
   }, []);
 
@@ -100,6 +121,7 @@ export default function Home() {
     setDraft(emptyExperience());
     setInterviewAnswer("");
     setSkippedGoals([]);
+    setPendingFacts([]);
     setCoachNote("先用你自己的话写一句经历，我会从最值得追问的地方开始。 ");
   }
 
@@ -113,8 +135,8 @@ export default function Home() {
     setExperiences((current) => current.filter((item) => item.id !== id));
   }
 
-  function submitInterviewAnswer() {
-    if (!currentQuestion) return;
+  async function submitInterviewAnswer() {
+    if (!currentQuestion || isAnalyzing) return;
     const answer = interviewAnswer.trim();
     if (!answer) return;
 
@@ -125,9 +147,25 @@ export default function Home() {
       return;
     }
 
-    setDraft((current) => applyInterviewAnswer(current, currentQuestion, answer));
-    setCoachNote("已记录为事实。下一问会根据你刚才的回答重新判断，不按固定题库机械提问。 ");
-    setInterviewAnswer("");
+    setIsAnalyzing(true);
+    try {
+      const result = await analyzeInterviewWithProvider(answer, draft);
+      const confirmed = applyConfirmedAgentFacts(draft, result.analysis);
+      const needsConfirmation = result.analysis.extractedFacts.filter((fact) => fact.status === "needs_confirmation");
+      setDraft(confirmed);
+      setPendingFacts(needsConfirmation);
+      setProviderLabel(result.provider === "openai" ? `GPT${result.model ? ` · ${result.model}` : ""}` : "Local");
+
+      const warningText = result.analysis.warnings.length ? ` ${result.analysis.warnings.join(" ")}` : "";
+      if (needsConfirmation.length) {
+        setCoachNote(`${result.analysis.acknowledgement} 其中 ${needsConfirmation.length} 条需要你确认后才会进入事实库。${warningText}`);
+      } else {
+        setCoachNote(`${result.analysis.acknowledgement} 已确认的信息已经入库，我会根据当前缺口继续追问。${warningText}`);
+      }
+      setInterviewAnswer("");
+    } finally {
+      setIsAnalyzing(false);
+    }
   }
 
   function chooseQuickOption(option: string) {
@@ -146,6 +184,23 @@ export default function Home() {
     setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
     setCoachNote(reason === "unknown" ? "记不清没关系，这一项不会被写进简历。 " : "已跳过。后续生成简历时不会假设你拥有这项信息。 ");
     setInterviewAnswer("");
+  }
+
+  function updatePendingFact(id: string, value: string) {
+    setPendingFacts((current) => current.map((fact) => fact.id === id ? { ...fact, value } : fact));
+  }
+
+  function confirmPendingFact(id: string) {
+    const fact = pendingFacts.find((item) => item.id === id);
+    if (!fact?.value.trim()) return;
+    setDraft((current) => applyOneFact(current, { ...fact, status: "confirmed", confidence: 1 }));
+    setPendingFacts((current) => current.filter((item) => item.id !== id));
+    setCoachNote("已按你确认后的文字保存。模型原来的推断不会覆盖你的修改。 ");
+  }
+
+  function rejectPendingFact(id: string) {
+    setPendingFacts((current) => current.filter((item) => item.id !== id));
+    setCoachNote("这条没有进入事实库。后续生成简历时也不会使用它。 ");
   }
 
   return (
@@ -206,7 +261,7 @@ export default function Home() {
               <div className="card">
                 <div className="sectionTitle"><h3>① 先告诉我这是什么经历</h3><span>不用写得像简历</span></div>
                 <div className="formGrid compact">
-                  <label><span>经历类型</span><select value={draft.type} onChange={(e) => { setDraft({ ...draft, type: e.target.value as ExperienceType }); setSkippedGoals([]); }}>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label><span>经历类型</span><select value={draft.type} onChange={(e) => { setDraft({ ...draft, type: e.target.value as ExperienceType }); setSkippedGoals([]); setPendingFacts([]); }}>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                   <label><span>岗位 / 项目名称</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label>
                   <label><span>公司 / 组织</span><input value={draft.organization} onChange={(e) => setDraft({ ...draft, organization: e.target.value })} /></label>
                   <label><span>开始时间</span><input type="month" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} /></label>
@@ -226,7 +281,7 @@ export default function Home() {
               <div className="coachColumn">
                 <div className="coachCard">
                   <div className="coachHeader">
-                    <div><span className="coachAvatar">HR</span><div><strong>CareerVault 简历顾问</strong><small>一次只问一个最有价值的问题</small></div></div>
+                    <div><span className="coachAvatar">HR</span><div><strong>CareerVault 简历顾问</strong><small>一次只问一个最有价值的问题 · {providerLabel}</small></div></div>
                     <span className={`readinessBadge ${readiness.score >= 60 ? "ready" : ""}`}>{readiness.score}% · {readiness.label}</span>
                   </div>
 
@@ -239,6 +294,21 @@ export default function Home() {
 
                   {!draft.rawDescription.trim() ? (
                     <div className="coachEmpty">先在左边写一句最原始的经历描述。哪怕只有“负责公众号运营”也可以。</div>
+                  ) : pendingFacts.length > 0 ? (
+                    <div className="confirmationPanel">
+                      <div className="confirmationIntro"><strong>先确认这 {pendingFacts.length} 条信息</strong><p>这些内容包含模糊数字、语义推断或低置信度归类。只有你确认后才会进入事实库。</p></div>
+                      {pendingFacts.map((fact) => (
+                        <div className="factConfirmCard" key={fact.id}>
+                          <div className="factMeta"><span>{fact.goal}</span><span>{Math.round(fact.confidence * 100)}% confidence</span></div>
+                          <textarea rows={2} value={fact.value} onChange={(e) => updatePendingFact(fact.id, e.target.value)} />
+                          <p>{fact.reason}</p>
+                          <div className="coachActions">
+                            <button className="primary" onClick={() => confirmPendingFact(fact.id)}>确认保存</button>
+                            <button className="ghost" onClick={() => rejectPendingFact(fact.id)}>不保存</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   ) : currentQuestion ? (
                     <div className="questionBlock">
                       <span className="questionGoal">当前追问 · {currentQuestion.goal}</span>
@@ -250,9 +320,9 @@ export default function Home() {
                       )}
                       <textarea rows={3} value={interviewAnswer} onChange={(e) => setInterviewAnswer(e.target.value)} placeholder={currentQuestion.placeholder} />
                       <div className="coachActions">
-                        <button className="primary" disabled={!interviewAnswer.trim()} onClick={submitInterviewAnswer}>回答并继续 →</button>
-                        <button className="ghost" onClick={() => skipCurrentQuestion("unknown")}>记不清</button>
-                        <button className="ghost" onClick={() => skipCurrentQuestion("skip")}>跳过</button>
+                        <button className="primary" disabled={!interviewAnswer.trim() || isAnalyzing} onClick={submitInterviewAnswer}>{isAnalyzing ? "HR 正在分析…" : "回答并继续 →"}</button>
+                        <button className="ghost" disabled={isAnalyzing} onClick={() => skipCurrentQuestion("unknown")}>记不清</button>
+                        <button className="ghost" disabled={isAnalyzing} onClick={() => skipCurrentQuestion("skip")}>跳过</button>
                       </div>
                       <div className="whyAsk"><strong>为什么问这个？</strong><p>{currentQuestion.why}</p></div>
                     </div>
@@ -263,7 +333,7 @@ export default function Home() {
                     </div>
                   )}
 
-                  <button className="primary full saveExperience" disabled={!draft.title.trim() || !draft.organization.trim() || !draft.rawDescription.trim()} onClick={saveExperience}>保存这段经历</button>
+                  <button className="primary full saveExperience" disabled={!draft.title.trim() || !draft.organization.trim() || !draft.rawDescription.trim() || pendingFacts.length > 0} onClick={saveExperience}>保存这段经历</button>
                 </div>
               </div>
             </div>
