@@ -33,11 +33,23 @@ function extractOutputText(payload) {
   return "";
 }
 
-const instructions = `You are CareerVault's job-description image transcriber.
-Read the uploaded recruitment/JD screenshot and extract ONLY text visibly supported by the image.
+function makeFileInput(fileDataUrl, filename) {
+  if (typeof fileDataUrl !== "string" || !fileDataUrl.startsWith("data:")) return null;
+  if (fileDataUrl.startsWith("data:image/")) {
+    return { kind: "image", content: { type: "input_image", image_url: fileDataUrl, detail: "high" } };
+  }
+  if (fileDataUrl.startsWith("data:application/pdf")) {
+    const base64 = fileDataUrl.includes(",") ? fileDataUrl.slice(fileDataUrl.indexOf(",") + 1) : fileDataUrl;
+    return { kind: "pdf", content: { type: "input_file", filename: filename || "job-description.pdf", file_data: base64 } };
+  }
+  return null;
+}
+
+const instructions = `You are CareerVault's job-description transcriber.
+Read the uploaded recruitment image or PDF and extract ONLY text supported by the uploaded document.
 Preserve the job title, responsibilities, requirements, preferred qualifications, education/experience requirements, tools/skills and other hiring criteria when visible.
 Do not invent missing requirements, company information, salary, seniority, technologies, or wording that is not readable.
-Remove obvious app chrome/navigation noise when it is unrelated to the job posting.
+Remove obvious app chrome/navigation noise when unrelated to the job posting.
 Return JSON only:
 {
   "roleTitle": string,
@@ -58,12 +70,12 @@ export default async function handler(req, res) {
   }
   if (req.method !== "POST") return json(res, 405, { error: "method_not_allowed" }, responseOrigin);
   if (requestOrigin && !origins.includes(requestOrigin)) return json(res, 403, { error: "origin_not_allowed" }, responseOrigin);
-  if (!process.env.OPENAI_API_KEY) return json(res, 503, { error: "openai_not_configured" }, responseOrigin);
+  if (!process.env.OPENAI_API_KEY) return json(res, 503, { error: "model_not_configured", detail: "服务端尚未配置模型密钥。" }, responseOrigin);
 
-  const imageDataUrl = req.body?.imageDataUrl;
-  if (typeof imageDataUrl !== "string" || !imageDataUrl.startsWith("data:image/")) {
-    return json(res, 400, { error: "image_required", detail: "请上传岗位截图或图片。" }, responseOrigin);
-  }
+  const fileDataUrl = req.body?.fileDataUrl || req.body?.imageDataUrl;
+  const filename = req.body?.filename || "job-description";
+  const fileInput = makeFileInput(fileDataUrl, filename);
+  if (!fileInput) return json(res, 400, { error: "file_required", detail: "请上传岗位图片或 PDF。" }, responseOrigin);
 
   const model = process.env.OPENAI_MODEL || DEFAULT_MODEL;
   try {
@@ -77,22 +89,29 @@ export default async function handler(req, res) {
         input: [{
           role: "user",
           content: [
-            { type: "input_text", text: "请逐项读取这张岗位/JD图片，只转录图片真实包含的招聘要求。" },
-            { type: "input_image", image_url: imageDataUrl, detail: "high" },
+            { type: "input_text", text: "请逐项读取上传的岗位/JD文件，只转录其中真实包含的招聘要求。" },
+            fileInput.content,
           ],
         }],
-        max_output_tokens: 2200,
+        max_output_tokens: 2600,
         store: false,
       }),
     });
     const payload = await upstream.json();
-    if (!upstream.ok) return json(res, upstream.status, { error: "openai_error", detail: payload?.error?.message || "Request failed" }, responseOrigin);
+    if (!upstream.ok) return json(res, upstream.status, { error: "model_error", detail: payload?.error?.message || "Request failed" }, responseOrigin);
     const text = extractOutputText(payload);
     let parsed;
     try { parsed = JSON.parse(text); } catch { return json(res, 502, { error: "invalid_model_json", detail: "模型没有返回可解析的 JD 文本。" }, responseOrigin); }
     if (typeof parsed?.jdText !== "string") return json(res, 502, { error: "invalid_model_payload", detail: "模型没有返回 JD 文本。" }, responseOrigin);
-    return json(res, 200, { provider: "openai", model, roleTitle: parsed.roleTitle || "", jdText: parsed.jdText }, responseOrigin);
-  } catch {
-    return json(res, 502, { error: "upstream_unavailable", detail: "JD 图片识别服务暂时不可用。" }, responseOrigin);
+    return json(res, 200, {
+      provider: "openai",
+      model,
+      roleTitle: parsed.roleTitle || "",
+      jdText: parsed.jdText,
+      visionUsed: true,
+      inputKind: fileInput.kind,
+    }, responseOrigin);
+  } catch (error) {
+    return json(res, 502, { error: "upstream_unavailable", detail: error instanceof Error ? error.message : "JD 文件识别服务暂时不可用。" }, responseOrigin);
   }
 }
