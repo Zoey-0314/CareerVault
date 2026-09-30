@@ -46,7 +46,9 @@ Experience intake
       ↓
 Adaptive HR interview
       ↓
-Structured facts
+Structured fact extraction
+      ↓
+Confirmed facts / confirmation needed
       ↓
 Experience library
       ↓
@@ -89,6 +91,72 @@ The interviewer supports three important escape paths:
 
 These answers never trigger fabricated replacement data.
 
+## Structured interview agent
+
+`src/lib/interviewAgent.ts` adds a provider-independent analysis layer on top of the question engine.
+
+One natural-language answer can produce several facts at once. For example:
+
+> 我主要用 AutoCAD 检查了一百多张图，后来又用 C# 做了插件。
+
+The analysis layer can identify multiple evidence categories in the same turn instead of asking the user to repeat them later:
+
+- tool: AutoCAD
+- tool: C#
+- action: drawing inspection / plugin development
+- scale: 100+ drawings
+
+Every extracted fact carries:
+
+- target field
+- interview goal
+- source text
+- confidence
+- professional reason
+- fact status
+
+Fact status is deliberately limited to:
+
+- `confirmed`
+- `needs_confirmation`
+
+Only facts explicitly supported by the user's wording may be marked `confirmed` and merged automatically.
+
+If the answer includes uncertainty such as `大概`, `好像`, `可能`, `记不清`, or if the model materially normalizes the meaning, the fact must remain `needs_confirmation` until the user accepts it.
+
+This rule prevents a future LLM from silently turning an approximate memory into fake precision.
+
+## Interview API contract
+
+The provider-independent route is:
+
+```text
+POST /api/ai/interview
+```
+
+Request:
+
+```json
+{
+  "answer": "我用 AutoCAD 检查了 120 张工程图",
+  "experience": {}
+}
+```
+
+Response contains:
+
+- provider identifier
+- acknowledgement
+- extracted facts
+- warnings
+- suggested next goal
+
+The current provider is `local-v1`, a deterministic local analyzer that requires no API key.
+
+A later LLM provider must keep the same contract so the UI, fact storage and resume generation layers do not depend on OpenAI, Claude, Gemini or any other specific model vendor.
+
+See `docs/AI_INTERVIEW_CONTRACT.md` for the full contract.
+
 ## Experience readiness
 
 Each draft has an information-readiness indicator rather than a fake resume score.
@@ -128,13 +196,19 @@ src/lib/types.ts
     Shared profile, experience and matching types
 
 src/lib/interview.ts
-    Adaptive interview questions, readiness, answer extraction
+    Adaptive interview questions, readiness and answer routing
+
+src/lib/interviewAgent.ts
+    Multi-fact extraction, confidence and truth-safety boundary
+
+src/app/api/ai/interview/route.ts
+    Provider-independent interview analysis API
 
 src/lib/hrRules.ts
     HR review rules and evidence-strength logic
 
 src/lib/hrPrompt.ts
-    Future LLM behavior contract
+    LLM behavior and structured-output contract
 
 src/lib/matching.ts
     Transparent JD-to-experience matching
@@ -155,9 +229,9 @@ Only saved profile data, experiences and JD text are persisted. Interview UI sta
 
 A later release can replace local persistence with an account + database layer without changing the fact model.
 
-## Future AI integration point
+## Current AI strategy
 
-The deterministic interview engine is intentionally usable before an external model is connected.
+The deterministic interview engine and local analyzer are intentionally usable before an external model is connected.
 
 A future model adapter should improve:
 
@@ -167,3 +241,13 @@ A future model adapter should improve:
 - rewriting resume bullets with better language.
 
 It must not become the source of truth. Every generated claim still has to trace back to stored user facts.
+
+## CI
+
+The branch includes a minimal GitHub Actions workflow that runs:
+
+- `npm install`
+- `npm run typecheck`
+- `npm run build`
+
+This guards the V1 branch against basic TypeScript and production-build regressions.
