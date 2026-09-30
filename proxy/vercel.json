@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "api/interview.mjs": {
-      "maxDuration": 15
-    }
-  }
-}
