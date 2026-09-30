@@ -1,11 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import "./responsive.css";
-import "./confirmation.css";
 
 export const metadata: Metadata = {
-  title: "CareerVault",
-  description: "Build a verified career memory and tailor it for every opportunity.",
+  title: "CareerVault — Career Memory & Resume Tailoring",
+  description: "A verified career memory that turns real experiences, credentials, and project evidence into role-specific resumes.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
