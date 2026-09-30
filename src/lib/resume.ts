@@ -16,6 +16,8 @@ function cleanLowSignal(text: string): string {
 export interface ProfessionalBullet {
   text: string;
   rationale: string[];
+  /** @deprecated UI compatibility alias. Prefer rationale in new code. */
+  reasons: string[];
   warnings: string[];
 }
 
@@ -40,6 +42,7 @@ export function buildProfessionalResumeBullet(experience: Experience): Professio
   return {
     text: base || "这段经历信息不足，建议先补充具体动作和结果。",
     rationale,
+    reasons: rationale,
     warnings,
   };
 }
