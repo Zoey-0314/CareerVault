@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NEXT_PUBLIC_CAREERVAULT_AI_URL: ${{ vars.CAREERVAULT_AI_URL }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.CAREERVAULT_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.CAREERVAULT_SUPABASE_PUBLISHABLE_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
