@@ -1,4 +1,5 @@
 import type { Experience, ExperienceType } from "@/lib/types";
+import { analyzeInterviewTurn, applyConfirmedAgentFacts } from "@/lib/interviewAgent";
 
 export type InterviewGoal =
   | "specificity"
@@ -113,9 +114,7 @@ function mergeText(existing: string, answer: string): string {
   return `${existing}；${value}`;
 }
 
-export function applyInterviewAnswer(experience: Experience, question: InterviewQuestion, answer: string): Experience {
-  const value = answer.trim();
-  if (!value) return experience;
+function applyQuestionFallback(experience: Experience, question: InterviewQuestion, value: string): Experience {
   if (question.goal === "specificity") return { ...experience, actions: mergeText(experience.actions, value) };
   if (question.goal === "tool") return { ...experience, tools: mergeText(experience.tools, value) };
   if (question.goal === "result") return { ...experience, outcomes: mergeText(experience.outcomes, value) };
@@ -129,4 +128,18 @@ export function applyInterviewAnswer(experience: Experience, question: Interview
   const fact = `${prefix[question.goal as keyof typeof prefix]}${value}`;
   if (experience.verifiedFacts.includes(fact)) return experience;
   return { ...experience, verifiedFacts: [...experience.verifiedFacts, fact] };
+}
+
+export function applyInterviewAnswer(experience: Experience, question: InterviewQuestion, answer: string): Experience {
+  const value = answer.trim();
+  if (!value) return experience;
+
+  const analysis = analyzeInterviewTurn(value, experience);
+  const next = applyConfirmedAgentFacts(experience, analysis);
+  const currentGoalFacts = analysis.extractedFacts.filter((fact) => fact.goal === question.goal);
+
+  if (currentGoalFacts.some((fact) => fact.status === "confirmed")) return next;
+  if (currentGoalFacts.some((fact) => fact.status === "needs_confirmation")) return next;
+
+  return applyQuestionFallback(next, question, value);
 }
