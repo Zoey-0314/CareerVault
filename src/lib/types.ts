@@ -55,7 +55,12 @@ export interface Credential {
   date: string;
   rank: string;
   description: string;
+  /** Backward-compatible preview/source for image credentials. */
   imageDataUrl?: string;
+  /** Generic uploaded source. Supports image data URLs and application/pdf data URLs. */
+  attachmentDataUrl?: string;
+  attachmentName?: string;
+  attachmentType?: string;
   assessment?: CredentialAssessment;
   followUpAnswer?: string;
 }

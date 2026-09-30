@@ -107,13 +107,17 @@ export function parseBackup(text: string): VaultState {
   return normalizeState(parsed as Partial<VaultState>);
 }
 
-export async function fileToCompressedDataUrl(file: File): Promise<string> {
-  const raw = await new Promise<string>((resolve, reject) => {
+export function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+export async function fileToCompressedDataUrl(file: File): Promise<string> {
+  const raw = await fileToDataUrl(file);
   if (!file.type.startsWith("image/")) return raw;
 
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -122,7 +126,7 @@ export async function fileToCompressedDataUrl(file: File): Promise<string> {
     img.onerror = reject;
     img.src = raw;
   });
-  const max = 1400;
+  const max = 1800;
   const scale = Math.min(1, max / Math.max(image.width, image.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(image.width * scale));
@@ -130,5 +134,5 @@ export async function fileToCompressedDataUrl(file: File): Promise<string> {
   const ctx = canvas.getContext("2d");
   if (!ctx) return raw;
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.82);
+  return canvas.toDataURL("image/jpeg", 0.9);
 }
