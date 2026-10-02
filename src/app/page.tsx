@@ -7,6 +7,7 @@ import {
   Pencil, RefreshCw, ShieldCheck, Sparkles, Target, Trash2, Upload, UserRound, WandSparkles, X,
 } from "lucide-react";
 import { CoachTranscript, type CoachMessage } from "@/components/CoachTranscript";
+import { JobWorkspace } from "@/components/JobWorkspace";
 import { ResumePanel } from "@/components/ResumePanel";
 import { analyzeCredentialWithProvider, analyzeInterviewWithProvider, analyzeJdFileWithProvider, isRemoteAiConfigured } from "@/lib/aiClient";
 import { getCloudUser, isCloudConfigured, loadVaultFromCloud, saveVaultToCloud, sendMagicLink, signOutCloud } from "@/lib/cloud";
@@ -14,9 +15,10 @@ import { assessCredentialLocally, credentialLevelLabel, sortCredentials } from "
 import { getExperienceEvidenceStrength, reviewCandidateProfile } from "@/lib/hrRules";
 import { getExperienceReadiness, getNextInterviewQuestion, type InterviewGoal, type InterviewQuestion } from "@/lib/interview";
 import { applyConfirmedAgentFacts, type ExtractedFact } from "@/lib/interviewAgent";
+import { createEmptyJobTarget } from "@/lib/jobApplication";
 import { matchExperiences } from "@/lib/matching";
 import { createBackup, fileToCompressedDataUrl, fileToDataUrl, loadVaultState, parseBackup, saveVaultState } from "@/lib/persistence";
-import type { Credential, CredentialType, Experience, ExperienceType, Profile, VaultState } from "@/lib/types";
+import type { Credential, CredentialType, Experience, ExperienceType, JobTarget, Profile, ResumeVersion, VaultState } from "@/lib/types";
 import { buildWorkspaceImportPrompt, parseWorkspaceImport } from "@/lib/vibeImport";
 
 type Tab = "overview" | "profile" | "experiences" | "credentials" | "job" | "resume";
@@ -70,6 +72,9 @@ export default function Home() {
   const [experiences, setExperiences] = useState<Experience[]>([]);
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [jd, setJd] = useState("");
+  const [jobTargets, setJobTargets] = useState<JobTarget[]>([]);
+  const [resumeVersions, setResumeVersions] = useState<ResumeVersion[]>([]);
+  const [activeJobTargetId, setActiveJobTargetId] = useState("");
   const [hydrated, setHydrated] = useState(false);
 
   const [draft, setDraft] = useState<Experience>(emptyExperience);
@@ -109,7 +114,11 @@ export default function Home() {
     (async () => {
       const state = await loadVaultState();
       if (!mounted) return;
-      setProfile(state.profile); setExperiences(state.experiences); setCredentials(state.credentials); setJd(state.jd);
+      const targets = state.jobTargets || [];
+      const activeId = state.activeJobTargetId || targets[0]?.id || "";
+      setProfile(state.profile); setExperiences(state.experiences); setCredentials(state.credentials);
+      setJobTargets(targets); setResumeVersions(state.resumeVersions || []); setActiveJobTargetId(activeId);
+      setJd(targets.find((item) => item.id === activeId)?.jd || state.jd);
       const remote = isRemoteAiConfigured();
       setRemoteInterviewEnabled(remote);
       setProviderLabel(remote ? "GPT · 待连接" : "Local");
@@ -122,7 +131,9 @@ export default function Home() {
     return () => { mounted = false; };
   }, []);
 
-  const vaultState = useMemo<VaultState>(() => ({ version: 2, profile, experiences, credentials, jd, updatedAt: new Date().toISOString() }), [profile, experiences, credentials, jd]);
+  const vaultState = useMemo<VaultState>(() => ({
+    version: 4, profile, experiences, credentials, jd, jobTargets, resumeVersions, activeJobTargetId, updatedAt: new Date().toISOString(),
+  }), [profile, experiences, credentials, jd, jobTargets, resumeVersions, activeJobTargetId]);
   useEffect(() => {
     if (!hydrated) return;
     const timer = window.setTimeout(() => saveVaultState(vaultState), 250);
@@ -137,7 +148,7 @@ export default function Home() {
   const sortedCredentials = useMemo(() => sortCredentials(credentials), [credentials]);
   const completion = Math.min(100, Math.round(
     ([profile.name, profile.email, profile.school, profile.major, profile.graduation].filter(Boolean).length / 5) * 30 +
-    (Math.min(experiences.length, 3) / 3) * 40 + (Math.min(credentials.length, 2) / 2) * 10 + (jd.trim() ? 20 : 0),
+    (Math.min(experiences.length, 3) / 3) * 40 + (Math.min(credentials.length, 2) / 2) * 10 + (jobTargets.length ? 20 : 0),
   ));
 
   function pushConversation(...items: CoachMessage[]) { setConversation((current) => [...current, ...items].slice(-12)); }
@@ -306,14 +317,73 @@ export default function Home() {
   }
   async function reanalyzeCredentialFollowUp() { if (credentialDraft.followUpAnswer?.trim()) await analyzeCredential(credentialDraft); }
 
+  function createJobTarget() {
+    const target = createEmptyJobTarget();
+    setJobTargets((current) => [target, ...current]);
+    setActiveJobTargetId(target.id);
+    setJd("");
+    setJdImageNote("");
+  }
+  function activateJobTarget(id: string) {
+    const target = jobTargets.find((item) => item.id === id);
+    if (!target) return;
+    setActiveJobTargetId(id);
+    setJd(target.jd);
+    setJdImageNote("");
+  }
+  function changeJobTarget(id: string, patch: Partial<JobTarget>) {
+    const target = jobTargets.find((item) => item.id === id);
+    if (!target) return;
+    const nextStatus = patch.status;
+    if (nextStatus && ["applied", "assessment", "interview", "offer"].includes(nextStatus) && !target.submittedResumeVersionId) return;
+    const updatedAt = new Date().toISOString();
+    setJobTargets((current) => current.map((item) => item.id === id ? { ...item, ...patch, updatedAt } : item));
+    if (id === activeJobTargetId && typeof patch.jd === "string") setJd(patch.jd);
+  }
+  function deleteJobTarget(id: string) {
+    const target = jobTargets.find((item) => item.id === id);
+    if (!target || target.submittedResumeVersionId) return;
+    const remaining = jobTargets.filter((item) => item.id !== id);
+    setJobTargets(remaining);
+    setResumeVersions((current) => current.filter((item) => item.jobTargetId !== id));
+    if (id === activeJobTargetId) {
+      const next = remaining[0];
+      setActiveJobTargetId(next?.id || "");
+      setJd(next?.jd || "");
+    }
+  }
+  function saveResumeVersion(version: ResumeVersion) {
+    setResumeVersions((current) => current.some((item) => item.id === version.id) ? current : [version, ...current]);
+    setJobTargets((current) => current.map((item) => item.id === version.jobTargetId
+      ? { ...item, status: item.status === "saved" ? "ready" : item.status, updatedAt: new Date().toISOString() }
+      : item));
+  }
+  function markJobApplied(id: string) {
+    const latest = resumeVersions
+      .filter((item) => item.jobTargetId === id)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+    if (!latest) return;
+    const now = new Date();
+    setJobTargets((current) => current.map((item) => item.id === id ? {
+      ...item,
+      status: "applied",
+      appliedAt: now.toISOString().slice(0, 10),
+      submittedResumeVersionId: latest.id,
+      updatedAt: now.toISOString(),
+    } : item));
+  }
+
   async function handleJdFile(file?: File) {
     if (!file) return;
     setJdImageAnalyzing(true); setJdImageNote("");
     try {
       const prepared = await prepareUploadedFile(file);
       const result = await analyzeJdFileWithProvider(prepared.dataUrl, file.name);
-      setJd(result.jdText.trim()); setProviderLabel(result.model ? `GPT · ${result.model}` : "GPT");
-      setJdImageNote(`已确认读取 ${result.inputKind === "pdf" ? "PDF" : "图片"}：${file.name}。请检查下方文字后再生成简历。`);
+      const nextJd = result.jdText.trim();
+      setJd(nextJd);
+      if (activeJobTargetId) changeJobTarget(activeJobTargetId, { jd: nextJd });
+      setProviderLabel(result.model ? `GPT · ${result.model}` : "GPT");
+      setJdImageNote(`已确认读取 ${result.inputKind === "pdf" ? "PDF" : "图片"}：${file.name}。JD 已保存到当前岗位，不依赖原招聘链接。`);
     } catch (error) {
       setJdImageNote(error instanceof Error ? error.message : "岗位文件识别失败，请改为复制粘贴 JD。");
     } finally { setJdImageAnalyzing(false); }
@@ -334,7 +404,14 @@ export default function Home() {
     a.href = url; a.download = `CareerVault-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(url);
   }
   async function restoreBackup(file?: File) {
-    if (!file) return; const restored = parseBackup(await file.text()); setProfile(restored.profile); setExperiences(restored.experiences); setCredentials(restored.credentials); setJd(restored.jd); await saveVaultState(restored);
+    if (!file) return;
+    const restored = parseBackup(await file.text());
+    const targets = restored.jobTargets || [];
+    const activeId = restored.activeJobTargetId || targets[0]?.id || "";
+    setProfile(restored.profile); setExperiences(restored.experiences); setCredentials(restored.credentials);
+    setJobTargets(targets); setResumeVersions(restored.resumeVersions || []); setActiveJobTargetId(activeId);
+    setJd(targets.find((item) => item.id === activeId)?.jd || restored.jd);
+    await saveVaultState(restored);
   }
   async function sendLoginLink() {
     if (!cloudEmail.trim()) return; setCloudBusy(true);
@@ -351,14 +428,21 @@ export default function Home() {
     if (!cloudUserId) return; setCloudBusy(true);
     try {
       const remote = await loadVaultFromCloud(cloudUserId); if (!remote) { setCloudNote("云端还没有备份。 "); return; }
-      setProfile(remote.profile); setExperiences(remote.experiences); setCredentials(remote.credentials || []); setJd(remote.jd); await saveVaultState(remote); setCloudNote("已从云端恢复到当前设备。 ");
+      await saveVaultState(remote);
+      const normalized = await loadVaultState();
+      const targets = normalized.jobTargets || [];
+      const activeId = normalized.activeJobTargetId || targets[0]?.id || "";
+      setProfile(normalized.profile); setExperiences(normalized.experiences); setCredentials(normalized.credentials || []);
+      setJobTargets(targets); setResumeVersions(normalized.resumeVersions || []); setActiveJobTargetId(activeId);
+      setJd(targets.find((item) => item.id === activeId)?.jd || normalized.jd);
+      setCloudNote("已从云端恢复到当前设备。 ");
     } catch (error) { setCloudNote(error instanceof Error ? error.message : "恢复失败"); } finally { setCloudBusy(false); }
   }
   async function logoutCloud() { await signOutCloud(); setCloudUserId(""); setCloudUserEmail(""); setCloudNote("已退出云同步账号。 "); }
 
   const nav = [
     ["overview", Layers3, "总览"], ["profile", UserRound, "个人档案"], ["experiences", BriefcaseBusiness, "经历库"],
-    ["credentials", Award, "奖项证书"], ["job", Target, "岗位匹配"], ["resume", FileText, "一页简历"],
+    ["credentials", Award, "奖项证书"], ["job", Target, "岗位库"], ["resume", FileText, "一页简历"],
   ] as const;
 
   return <div className="appFrame">
@@ -372,13 +456,13 @@ export default function Home() {
       <header className="topbar"><div><span className="kicker">CAREER INTELLIGENCE</span><h1>{profile.name ? `${profile.name} 的 CareerVault` : "CareerVault"}</h1></div><div className="topActions"><span className="statusPill"><Sparkles size={14} />{providerLabel}</span><span className="statusPill"><Gauge size={14} />{completion}%</span></div></header>
 
       {tab === "overview" && <section className="sectionStack">
-        <div className="heroPanel"><div><span className="eyebrow">YOUR CAREER, AS STRUCTURED EVIDENCE</span><h2>把做过的事，变成可以反复复用的职业资产。</h2><p>经历只整理一次。CareerVault 保存事实、追问缺口，再针对岗位选择最有证明力的内容。</p></div><button className="button primary" onClick={() => setTab("experiences")}><WandSparkles size={16} />添加经历</button></div>
-        <div className="metricGrid"><article className="metricCard"><BriefcaseBusiness size={18} /><strong>{experiences.length}</strong><span>经历资产</span></article><article className="metricCard"><Award size={18} /><strong>{credentials.length}</strong><span>奖项与证书</span></article><article className="metricCard"><Target size={18} /><strong>{jd.trim() ? "已设置" : "未设置"}</strong><span>目标岗位</span></article><article className="metricCard"><ShieldCheck size={18} /><strong>{completion}%</strong><span>职业档案完整度</span></article></div>
+        <div className="heroPanel"><div><span className="eyebrow">YOUR CAREER, AS STRUCTURED EVIDENCE</span><h2>把做过的事，变成可以反复复用的职业资产。</h2><p>经历只整理一次。CareerVault 保存事实、追问缺口，再针对岗位选择最有证明力的内容，并记住每次真正投出去的版本。</p></div><button className="button primary" onClick={() => setTab("experiences")}><WandSparkles size={16} />添加经历</button></div>
+        <div className="metricGrid"><article className="metricCard"><BriefcaseBusiness size={18} /><strong>{experiences.length}</strong><span>经历资产</span></article><article className="metricCard"><Award size={18} /><strong>{credentials.length}</strong><span>奖项与证书</span></article><article className="metricCard"><Target size={18} /><strong>{jobTargets.length}</strong><span>目标岗位</span></article><article className="metricCard"><ShieldCheck size={18} /><strong>{completion}%</strong><span>职业档案完整度</span></article></div>
         <div className="splitGrid"><article className="panel"><div className="panelHeading"><div><span className="eyebrow">NEXT BEST ACTION</span><h3>下一步最值得补什么</h3></div></div><div className="actionRows">
           {!experiences.length && <button onClick={() => setTab("experiences")}><BriefcaseBusiness size={17} /><div><strong>录入第一段经历</strong><span>AI 会从事实开始追问，不要求你先会写简历。</span></div><ChevronRight size={16} /></button>}
           {experiences.length > 0 && credentials.length === 0 && <button onClick={() => setTab("credentials")}><Award size={17} /><div><strong>补充奖项或证书</strong><span>支持图片或 PDF，成功读取后会明确显示识别状态。</span></div><ChevronRight size={16} /></button>}
-          {!jd.trim() && <button onClick={() => setTab("job")}><Target size={17} /><div><strong>添加一个目标岗位</strong><span>支持粘贴 JD、岗位截图或 PDF。</span></div><ChevronRight size={16} /></button>}
-          {jd.trim() && <button onClick={() => setTab("resume")}><FileText size={17} /><div><strong>查看一页简历</strong><span>只选最相关、最能证明的事实。</span></div><ChevronRight size={16} /></button>}
+          {!jobTargets.length && <button onClick={() => setTab("job")}><Target size={17} /><div><strong>保存第一个目标岗位</strong><span>把公司、岗位、JD 和后续投递版简历放到同一条记录。</span></div><ChevronRight size={16} /></button>}
+          {jobTargets.length > 0 && <button onClick={() => setTab("job")}><Target size={17} /><div><strong>继续当前投递</strong><span>查看岗位阶段、JD 快照和实际投递的简历版本。</span></div><ChevronRight size={16} /></button>}
         </div></article>
         <article className="panel dataPanel"><div className="panelHeading"><div><span className="eyebrow">DATA SAFETY</span><h3>你的记录现在存在哪里</h3></div><Database size={20} /></div><div className="safetyLine"><CheckCircle2 size={16} /><div><strong>当前设备：IndexedDB</strong><span>关闭浏览器后仍会保留。</span></div></div><div className="safetyLine"><CircleAlert size={16} /><div><strong>但它不是账号云盘</strong><span>清理网站数据、换浏览器或换设备仍可能丢失。</span></div></div><div className="buttonRow"><button className="button secondary" onClick={downloadBackup}><Download size={15} />导出备份</button><label className="button secondary fileButton"><Upload size={15} />恢复备份<input type="file" accept="application/json,.json" onChange={(e) => restoreBackup(e.target.files?.[0])} /></label></div></article></div>
         <article className="panel cloudPanel"><div className="panelHeading"><div><span className="eyebrow">OPTIONAL CLOUD SYNC</span><h3>跨设备同步</h3></div>{isCloudConfigured() ? <Cloud size={20} /> : <CloudOff size={20} />}</div>
@@ -419,13 +503,33 @@ export default function Home() {
         <div className="libraryHeader"><div><span className="eyebrow">CREDENTIAL VAULT</span><h3>已保存</h3></div><span>{credentials.length} 项</span></div>{credentials.length === 0 ? <div className="emptyState panel">还没有保存的奖项或证书。</div> : <div className="cardGrid">{sortedCredentials.map((item) => <article className="assetCard credentialCard" key={item.id}>{item.imageDataUrl && <img src={item.imageDataUrl} alt="证书缩略图" />}{item.attachmentType === "application/pdf" && <div className="questionNotice"><FileText size={15} /><span>{item.attachmentName || "PDF"}</span></div>}<div className="assetTop"><span className="softTag">{credentialLabels[item.type]}</span><div className="buttonRow"><button className="iconButton" onClick={() => editCredential(item)}><Pencil size={15} /></button><button className="iconButton" onClick={() => setCredentials((current) => current.filter((x) => x.id !== item.id))}><Trash2 size={15} /></button></div></div><h4>{item.name}</h4><span className="metaLine">{item.issuer || "未知颁发方"}{item.rank ? ` · ${item.rank}` : ""}</span>{item.assessment && <div className="credentialMiniScore"><strong>{item.assessment.score}</strong><span>{item.assessment.tier} · {credentialLevelLabel(item.assessment.level)}</span></div>}<p>{item.assessment?.whatItProves || item.description}</p></article>)}</div>}
       </section>}
 
-      {tab === "job" && <section className="sectionStack narrow">
-        <div className="sectionIntro"><span className="eyebrow">TARGET ROLE</span><h2>岗位要求决定选材，而不是把人生全部塞进一页。</h2><p>可以复制粘贴 JD，也可以上传招聘截图或 PDF；文件识别必须得到服务端“已读取”确认。</p></div>
-        <article className="panel formPanel"><div className="uploadZone"><ImagePlus size={22} /><div><strong>从岗位图片 / PDF 识别 JD</strong><span>只转录文件里真实出现的岗位职责和任职要求。</span></div><label className="button secondary fileButton"><Upload size={15} />{jdImageAnalyzing ? "识别中…" : "选择图片 / PDF"}<input type="file" accept="image/*,application/pdf,.pdf" disabled={jdImageAnalyzing} onChange={(e) => handleJdFile(e.target.files?.[0])} /></label></div>{jdImageAnalyzing && <div className="questionNotice"><Loader2 className="spin" size={16} /><div><strong>正在读取岗位文件</strong><span>识别完成后会填到下面的 JD 文本框。</span></div></div>}{jdImageNote && <p className="inlineNote">{jdImageNote}</p>}<label><span>岗位 JD（可粘贴，也可修改识别结果）</span><textarea rows={14} value={jd} onChange={(e) => setJd(e.target.value)} placeholder="粘贴岗位职责与任职要求，或上传岗位图片/PDF自动识别…" /></label></article>
-        <div className="matchList">{matches.map((match) => { const item = experiences.find((x) => x.id === match.experienceId); if (!item) return null; return <article className="matchCard" key={match.experienceId}><div><span className="softTag">{experienceLabels[item.type]}</span><h4>{item.title}</h4><span className="metaLine">{item.organization} · 证据强度 {getExperienceEvidenceStrength(item)}</span><div className="chipRow">{match.matchedKeywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div></div><div className="matchScore"><strong>{match.score}</strong><span>% 覆盖</span></div></article>; })}</div>{jd.trim() && <div className="buttonRow"><button className="button primary" onClick={() => setTab("resume")}><FileText size={15} />生成该岗位的一页简历</button></div>}
-      </section>}
+      {tab === "job" && <JobWorkspace
+        jobTargets={jobTargets}
+        resumeVersions={resumeVersions}
+        activeJobTargetId={activeJobTargetId}
+        experiences={experiences}
+        matches={matches}
+        jdImageAnalyzing={jdImageAnalyzing}
+        jdImageNote={jdImageNote}
+        onCreateTarget={createJobTarget}
+        onActivateTarget={activateJobTarget}
+        onChangeTarget={changeJobTarget}
+        onDeleteTarget={deleteJobTarget}
+        onJdFile={handleJdFile}
+        onGoResume={() => setTab("resume")}
+        onMarkApplied={markJobApplied}
+      />}
 
-      {tab === "resume" && <ResumePanel profile={profile} jd={jd} experiences={experiences} matches={matches} credentials={credentials} onGoToJob={() => setTab("job")} />}
+      {tab === "resume" && <ResumePanel
+        profile={profile}
+        jd={jd}
+        experiences={experiences}
+        matches={matches}
+        credentials={credentials}
+        activeJobTargetId={activeJobTargetId}
+        onSaveVersion={saveResumeVersion}
+        onGoToJob={() => setTab("job")}
+      />}
     </main>
   </div>;
 }
