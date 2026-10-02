@@ -1,3 +1,4 @@
+import { normalizeExperienceV3 } from "@/lib/experienceModel";
 import type { VaultState } from "@/lib/types";
 
 const DB_NAME = "careervault";
@@ -19,7 +20,7 @@ function openDb(): Promise<IDBDatabase> {
 
 function emptyState(): VaultState {
   return {
-    version: 2,
+    version: 3,
     profile: { name: "", email: "", phone: "", city: "", school: "", major: "", degree: "", graduation: "" },
     experiences: [],
     credentials: [],
@@ -30,12 +31,15 @@ function emptyState(): VaultState {
 
 function normalizeState(value: Partial<VaultState> | null | undefined): VaultState {
   const base = emptyState();
+  const experiences = Array.isArray(value?.experiences)
+    ? value!.experiences!.map((experience) => normalizeExperienceV3(experience))
+    : [];
   return {
     ...base,
     ...value,
-    version: 2,
+    version: 3,
     profile: { ...base.profile, ...(value?.profile || {}) },
-    experiences: Array.isArray(value?.experiences) ? value!.experiences! : [],
+    experiences,
     credentials: Array.isArray(value?.credentials) ? value!.credentials! : [],
     jd: typeof value?.jd === "string" ? value.jd : "",
     updatedAt: typeof value?.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
@@ -98,12 +102,14 @@ export async function saveVaultState(state: VaultState): Promise<void> {
 }
 
 export function createBackup(state: VaultState): string {
-  return JSON.stringify({ kind: "CAREERVAULT_BACKUP_V2", exportedAt: new Date().toISOString(), state: normalizeState(state) }, null, 2);
+  return JSON.stringify({ kind: "CAREERVAULT_BACKUP_V3", exportedAt: new Date().toISOString(), state: normalizeState(state) }, null, 2);
 }
 
 export function parseBackup(text: string): VaultState {
   const parsed = JSON.parse(text) as { kind?: string; state?: Partial<VaultState> } | Partial<VaultState>;
-  if ("kind" in parsed && parsed.kind === "CAREERVAULT_BACKUP_V2" && parsed.state) return normalizeState(parsed.state);
+  if ("kind" in parsed && (parsed.kind === "CAREERVAULT_BACKUP_V3" || parsed.kind === "CAREERVAULT_BACKUP_V2") && parsed.state) {
+    return normalizeState(parsed.state);
+  }
   return normalizeState(parsed as Partial<VaultState>);
 }
 
