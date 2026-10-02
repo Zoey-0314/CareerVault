@@ -24,6 +24,16 @@ function json(res, status, body, origin) {
   res.end(JSON.stringify(body));
 }
 
+function cleanJsonText(text) {
+  let raw = String(text || "").trim();
+  if (!raw) return "";
+  raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const first = raw.indexOf("{");
+  const last = raw.lastIndexOf("}");
+  if (first >= 0 && last > first) raw = raw.slice(first, last + 1);
+  return raw.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/,\s*([}\]])/g, "$1");
+}
+
 function compactExperience(experience) {
   return {
     type: experience?.type || "",
@@ -34,7 +44,7 @@ function compactExperience(experience) {
     actions: experience?.actions || "",
     tools: experience?.tools || "",
     outcomes: experience?.outcomes || "",
-    verifiedFacts: Array.isArray(experience?.verifiedFacts) ? experience.verifiedFacts.slice(-18) : [],
+    verifiedFacts: Array.isArray(experience?.verifiedFacts) ? experience.verifiedFacts.slice(-24) : [],
   };
 }
 
@@ -52,8 +62,16 @@ FACT SAFETY
 - If a claim is approximate, ambiguous, inferred, or materially stronger than the user's wording, mark needs_confirmation.
 - Allowed goals: specificity, tool, scale, result, ownership, difficulty, evidence.
 - Allowed targets: actions, tools, outcomes, verifiedFacts.
-- For verifiedFacts, use these prefixes when relevant: 规模：, 个人贡献：, AI参与：, 难点：, 证据：.
+- For verifiedFacts, use these prefixes when relevant: 规模：, 个人贡献：, AI参与：, 难点：, 证据：, 面试准备：.
 - If the user says they do not know / do not remember / did not track something, do not ask the same topic again.
+
+AI-ASSISTED PROJECT RULES
+- AI use is NOT automatically a resume bullet and should not be treated as a negative signal.
+- When the user states that AI generated substantial code, save the truthful boundary as AI参与：... .
+- Also create one or more 面试准备：... verifiedFacts describing concrete topics the user should be ready to explain in a real interview. These are preparation prompts, NOT invented answers or claims.
+- Interview-prep prompts should be grounded in modules already present in the experience, e.g. architecture decisions, why a safety mechanism exists, debugging decisions, tests, integration, failure cases, or how the user verified AI-generated code.
+- Never fabricate what the user would answer. If their understanding is unknown, phrase it as something to prepare, such as “面试准备：说明 SafeDwgSaver 为什么采用临时文件+验证+替换，以及如何验证失败不会损坏原图”。
+- Resume wording should focus on what the user actually reviewed, modified, debugged, integrated, tested, validated, designed or decided, not on hiding or exaggerating authorship.
 
 QUESTION SELECTION RULES
 - Questions MUST be generated from the existing information, not from a fixed questionnaire.
@@ -62,8 +80,8 @@ QUESTION SELECTION RULES
 - Do not ask for tools if tools are already well evidenced.
 - Do not ask for difficulty merely to fill a checklist; ask it only when it may reveal decision-making, debugging, coordination, or problem solving.
 - Do not ask for evidence if the user already has obvious evidence or if another missing fact is more valuable.
-- For project/coursework/research/coding experiences, if AI involvement is not yet known and the project plausibly used AI coding or generative AI, you MAY ask under goal=ownership whether AI was used, what AI generated, and what the user personally decided, verified, debugged, integrated, or tested. The point is to separate AI assistance from the user's contribution, not to penalize AI use.
-- When AI involvement is already stated, do not ask again.
+- For project/coursework/research/coding experiences, if AI involvement is not yet known and the project plausibly used AI coding or generative AI, you MAY ask under goal=ownership whether AI was used, what AI generated, and what the user personally decided, verified, debugged, integrated, or tested.
+- When AI involvement is already stated, do not ask again. Instead, if useful, ask a technical understanding question about a specific module so the user can prepare for interviews.
 - For a mature experience with enough concrete actions, tools, outcomes and ownership, stop instead of chasing 100% for low-value fields.
 
 PREVIOUS QUESTIONS
@@ -75,9 +93,9 @@ QUESTION STYLE
 - Ask one concise question at a time.
 - Explain in one short sentence why it matters to HR/resume quality.
 - Options are optional quick replies, maximum 5.
-- Make the question specific to the candidate's current project whenever possible. Mention known context instead of generic wording.
+- Make the question specific to the candidate's current project whenever possible.
 
-Return only the structured schema.`;
+Return only JSON matching the requested schema.`;
 
 const responseSchema = {
   type: "object",
@@ -103,12 +121,7 @@ const responseSchema = {
       },
     },
     warnings: { type: "array", items: { type: "string" } },
-    suggestedNextGoal: {
-      anyOf: [
-        { type: "string", enum: ["specificity", "tool", "scale", "result", "ownership", "difficulty", "evidence"] },
-        { type: "null" },
-      ],
-    },
+    suggestedNextGoal: { anyOf: [{ type: "string", enum: ["specificity", "tool", "scale", "result", "ownership", "difficulty", "evidence"] }, { type: "null" }] },
     nextQuestion: {
       anyOf: [
         {
@@ -131,6 +144,33 @@ const responseSchema = {
   },
   required: ["acknowledgement", "extractedFacts", "warnings", "suggestedNextGoal", "nextQuestion", "complete"],
 };
+
+function normalizeAnalysis(value) {
+  if (!value || typeof value !== "object") return null;
+  if (!Array.isArray(value.extractedFacts)) value.extractedFacts = [];
+  if (!Array.isArray(value.warnings)) value.warnings = [];
+  if (!("nextQuestion" in value)) value.nextQuestion = null;
+  if (!("suggestedNextGoal" in value)) value.suggestedNextGoal = value.nextQuestion?.goal || null;
+  if (typeof value.acknowledgement !== "string") value.acknowledgement = "已读取这轮回答。";
+  if (typeof value.complete !== "boolean") value.complete = !value.nextQuestion;
+  value.extractedFacts = value.extractedFacts.filter((fact) => fact && typeof fact.value === "string" && fact.value.trim());
+  return value;
+}
+
+async function repairJson(ai, rawText) {
+  const { upstream, payload } = await createResponse(ai, {
+    model: ai.model,
+    reasoning: { effort: "low" },
+    instructions: "Convert the supplied malformed model output into valid JSON only. Preserve meaning exactly. Do not invent facts. Return one JSON object and no markdown.",
+    input: JSON.stringify({ schema: responseSchema, malformedOutput: rawText }),
+    text: { format: { type: "json_object" } },
+    max_output_tokens: 1600,
+    store: false,
+  });
+  if (!upstream.ok) return null;
+  try { return normalizeAnalysis(JSON.parse(cleanJsonText(extractOutputText(payload)))); }
+  catch { return null; }
+}
 
 export default async function handler(req, res) {
   const origins = allowedOrigins(req);
@@ -168,30 +208,20 @@ export default async function handler(req, res) {
       reasoning: { effort: "high" },
       instructions,
       input,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "career_interview_turn",
-          schema: responseSchema,
-        },
-      },
-      max_output_tokens: 1600,
+      text: { format: ai.provider === "deepseek" ? { type: "json_object" } : { type: "json_schema", name: "career_interview_turn", schema: responseSchema } },
+      max_output_tokens: 1800,
       store: false,
     });
 
     if (!upstream.ok) {
-      return json(res, upstream.status, {
-        error: "model_error",
-        provider: ai.provider,
-        detail: payload?.error?.message || `${providerDisplayName(ai.provider)} request failed`,
-        model: ai.model,
-      }, responseOrigin);
+      return json(res, upstream.status, { error: "model_error", provider: ai.provider, detail: payload?.error?.message || `${providerDisplayName(ai.provider)} request failed`, model: ai.model }, responseOrigin);
     }
 
-    const text = extractOutputText(payload);
-    let analysis;
-    try { analysis = JSON.parse(text); }
-    catch { return json(res, 502, { error: "invalid_model_json", provider: ai.provider, detail: "模型返回内容无法解析。", model: ai.model }, responseOrigin); }
+    const rawText = extractOutputText(payload);
+    let analysis = null;
+    try { analysis = normalizeAnalysis(JSON.parse(cleanJsonText(rawText))); } catch { analysis = null; }
+    if (!analysis) analysis = await repairJson(ai, rawText);
+    if (!analysis) return json(res, 502, { error: "invalid_model_json", provider: ai.provider, detail: "模型返回内容无法解析，自动修复后仍失败。", model: ai.model }, responseOrigin);
 
     const answeredText = answer.trim();
     const previousText = previousQuestion?.question?.trim() || "";
@@ -200,17 +230,12 @@ export default async function handler(req, res) {
       if (nextText === previousText || askedQuestions.some((q) => typeof q === "string" && q.trim() === nextText)) {
         analysis.nextQuestion = null;
         analysis.complete = true;
-        analysis.warnings = [...(analysis.warnings || []), "模型尝试重复已问问题，本轮已阻止重复。"];
+        analysis.warnings = [...analysis.warnings, "模型尝试重复已问问题，本轮已阻止重复。"];
       }
     }
 
     return json(res, 200, { provider: ai.provider, model: ai.model, analysis }, responseOrigin);
   } catch (error) {
-    return json(res, 502, {
-      error: "upstream_unavailable",
-      provider: ai.provider,
-      detail: error instanceof Error ? error.message : `${providerDisplayName(ai.provider)} 服务暂时不可用。`,
-      model: ai.model,
-    }, responseOrigin);
+    return json(res, 502, { error: "upstream_unavailable", provider: ai.provider, detail: error instanceof Error ? error.message : `${providerDisplayName(ai.provider)} 服务暂时不可用。`, model: ai.model }, responseOrigin);
   }
 }
