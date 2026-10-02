@@ -20,31 +20,21 @@ export interface Profile {
 }
 
 export interface ExperienceEvidence {
-  /** Natural scope/quantity facts the user can defend. */
   scale: string[];
-  /** What the user personally owned, decided, reviewed, changed or delivered. */
   ownership: string[];
-  /** Difficulties and how the user handled them. */
   difficulties: string[];
-  /** Repositories, reports, files, demos, certificates or other traceable proof. */
   artifacts: string[];
 }
 
 export interface ExperienceAiContext {
-  /** null means not discussed yet. */
   assisted: boolean | null;
-  /** What AI generated or assisted with. Internal truth boundary; never a resume claim by itself. */
   aiContribution: string[];
-  /** What the user personally decided, reviewed, modified, debugged, integrated, tested or validated. */
   userContribution: string[];
 }
 
 export interface ExperienceInterviewPrep {
-  /** Concrete questions/topics the candidate should be ready to explain truthfully. */
   questions: string[];
-  /** Known weak points or unclear areas to review before an interview. */
   weakPoints: string[];
-  /** Technical/product topics worth reviewing; not invented answers. */
   topicsToReview: string[];
 }
 
@@ -59,10 +49,6 @@ export interface Experience {
   actions: string;
   tools: string;
   outcomes: string;
-  /**
-   * Legacy free-form fact list retained for backward compatibility with existing local/cloud backups.
-   * New structured facts should be written to evidence/aiContext/interviewPrep instead.
-   */
   verifiedFacts: string[];
   evidence?: ExperienceEvidence;
   aiContext?: ExperienceAiContext;
@@ -75,6 +61,7 @@ export type CredentialType = "award" | "certificate" | "honor" | "competition" |
 export type CredentialLevel = "international" | "national" | "provincial" | "city" | "school" | "organization" | "industry" | "unknown";
 
 export interface CredentialAssessment {
+  /** Resume value score. This is NOT OCR/recognition confidence. */
   score: number;
   tier: "旗舰" | "高价值" | "有效" | "补充" | "信息不足";
   level: CredentialLevel;
@@ -82,6 +69,10 @@ export interface CredentialAssessment {
   whatItProves: string;
   followUpQuestion?: string;
   needsConfirmation: boolean;
+  /** Confidence that uploaded document fields were read correctly; undefined for manual-only entries. */
+  recognitionConfidence?: number;
+  recognitionLabel?: "高" | "中" | "低";
+  recognitionNotes?: string[];
 }
 
 export interface Credential {
@@ -92,9 +83,7 @@ export interface Credential {
   date: string;
   rank: string;
   description: string;
-  /** Backward-compatible preview/source for image credentials. */
   imageDataUrl?: string;
-  /** Generic uploaded source. Supports image data URLs and application/pdf data URLs. */
   attachmentDataUrl?: string;
   attachmentName?: string;
   attachmentType?: string;
@@ -114,7 +103,6 @@ export interface ResumeDraft {
 }
 
 export interface VaultState {
-  /** V2 is accepted only for in-memory/backward-compatible callers; persistence normalizes to V3. */
   version: 2 | 3;
   profile: Profile;
   experiences: Experience[];
