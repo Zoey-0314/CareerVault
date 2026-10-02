@@ -114,7 +114,8 @@ export interface ResumeDraft {
 }
 
 export interface VaultState {
-  version: 3;
+  /** V2 is accepted only for in-memory/backward-compatible callers; persistence normalizes to V3. */
+  version: 2 | 3;
   profile: Profile;
   experiences: Experience[];
   credentials: Credential[];
