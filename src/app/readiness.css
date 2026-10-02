@@ -1,0 +1,15 @@
+.careerReadinessPanel { display: grid; gap: 14px; }
+.readinessDimensionList { display: grid; gap: 11px; }
+.readinessDimension { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(160px, 1.2fr) 42px; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+.readinessDimension:first-child { border-top: 0; }
+.readinessDimension strong { display: block; font-size: 12px; }
+.readinessDimension span { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.readinessDimension b { color: var(--muted); font-size: 10px; text-align: right; font-weight: 700; }
+.readinessBar { height: 5px; overflow: hidden; border-radius: 999px; background: #e9e8e2; }
+.readinessBar > span { height: 100%; margin: 0; border-radius: 999px; background: var(--accent); }
+.readinessNextAction { border: 1px solid var(--line); border-radius: 12px; background: var(--surface-strong); display: grid; grid-template-columns: 20px 1fr 16px; gap: 10px; align-items: center; padding: 13px 14px; text-align: left; color: var(--ink); }
+.readinessNextAction > svg:first-child { color: var(--accent-dark); }
+.readinessNextAction > svg:last-child { color: var(--muted-2); }
+.readinessNextAction strong { display: block; font-size: 12px; }
+.readinessNextAction span { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+@media (max-width: 700px) { .readinessDimension { grid-template-columns: 1fr 38px; } .readinessBar { grid-column: 1 / -1; grid-row: 2; } }

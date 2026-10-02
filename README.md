@@ -1,134 +1,101 @@
 # CareerVault
 
 > **Tell your story once. Tailor it for every opportunity.**  
-> **经历认真整理一次，此后针对不同岗位自动选材、改写和生成简历。**
+> **经历认真整理一次，此后围绕真实事实，针对不同岗位选材、改写、投递和准备面试。**
 
-CareerVault 是一个 **local-first 的个人职业经历资产库 + AI 简历定制工作台**。
+CareerVault 是一个 **local-first 的职业经历资产库 + AI 求职工作台**。
 
-它不是“把一段经历润色得更像 AI 写的”，而是先帮用户长期保存真实经历，再通过专业 HR 风格的追问补全事实，最后根据目标岗位 JD 自动选择最相关的证据、压缩表达并生成一页简历。
+它不是从“一份已经写好的简历”开始，而是先保存你真正做过的事情、个人贡献、证据和边界，再把这些事实用于岗位匹配、定制简历、投递版本留档和面试准备。
 
-CareerVault is a **local-first career memory and AI resume tailoring workspace**. Instead of rewriting a resume from scratch every time, it builds a reusable, verified career evidence vault and turns that evidence into role-specific resumes.
+CareerVault is a **local-first career evidence vault and AI-assisted job application workspace**. It stores defensible career facts first, then uses them to tailor resumes, preserve submitted versions, and prepare for interviews without inventing achievements.
+
+**正式入口 / Primary app:** https://career-vault-sage.vercel.app/
+
+GitHub Pages 仅作为静态镜像。由于浏览器 IndexedDB 按域名隔离，GitHub Pages 与 Vercel 的本地数据不会自动共享。
 
 ---
 
-## 中文说明
+# 中文说明
 
-### 为什么做 CareerVault？
+## 1. CareerVault 解决什么问题？
 
-大多数 AI 简历工具从“你已经有一份简历”开始。
+很多求职工具默认你已经有一份完整简历，但真实情况往往是：
 
-CareerVault 从更早的一步开始：
+- 项目、实习、比赛结束几个月后，具体细节已经忘了；
+- 只记得“参与开发”“负责运营”，却说不清本人真正做了什么；
+- AI 很容易为了让简历“更好看”自动补数字、夸大 ownership；
+- 同一段经历投不同岗位时，需要重新选择重点；
+- AI Coding / Vibe Coding 项目里，代码可能大量由 AI 辅助生成，但本人仍做了需求、审查、调试、集成、测试或验收，需要把边界说清；
+- 奖状、证书、聘书很多，不知道哪些值得写，也容易把“识别准确度”和“简历价值”混为一谈；
+- 同时投多个岗位后，容易忘记“这家公司收到的是哪一版简历”；
+- 面试前真正需要准备的是对方看到的那份简历和当时的 JD，而不是今天已经改过的主经历库。
 
-> **你到底做过什么？哪些事情值得写？哪些数据是真的？哪些能力有证据？**
-
-很多人的问题并不是不会写简历，而是：
-
-- 实习、比赛、课程项目、校园活动做完几个月后，细节已经忘了；
-- 只记得“负责运营”“参与开发”“做过调研”，但说不清自己具体做了什么；
-- 每次投不同岗位都从零改简历；
-- AI 为了“写得好看”容易自动补数字、夸大 ownership，甚至编造结果；
-- Vibe Coding / AI Coding 项目很多工作发生在 AI 工作区里，重新口述项目非常浪费时间；
-- 奖状和证书很多，但不知道哪些真的值得写进简历；
-- 一段很强的项目，最后常被写成 Git 日志、依赖列表和技术堆砌。
-
-CareerVault 的目标是把这些问题拆成一个长期可复用的流程：
+CareerVault 把流程拆成：
 
 ```text
-真实经历
-   ↓
-AI / HR 追问
-   ↓
-结构化事实资产
-   ↓
-目标岗位 JD
-   ↓
-岗位证据匹配
-   ↓
-一页定制简历
-   ↓
-Word 导出
+真实经历 / 奖项证据
+        ↓
+AI 追问与结构化
+        ↓
+职业事实资产库
+        ↓
+目标岗位 + JD 快照
+        ↓
+语义匹配与事实约束简历
+        ↓
+ResumeVersion 投递快照
+        ↓
+基于实际投递版的面试准备
+        ↓
+面试复盘（不反向伪造成新成果）
 ```
 
 ---
 
-## 核心理念
+## 2. 核心原则
 
-### 1. Facts are the source of truth
+### Facts are the source of truth
 
-**事实永远优先于“包装”。**
+AI 可以帮助提取、追问、排序、压缩和改写，但不能替用户创造事实。
 
-AI 可以：
+CareerVault 明确禁止把没有依据的信息包装进简历，例如：
 
-- 提取事实；
-- 帮你追问遗漏信息；
-- 判断哪些经历更适合某个岗位；
-- 改写表达方式；
-- 压缩和排序内容。
+- 没统计过的百分比；
+- 不存在的用户量或性能提升；
+- 把“参与”改成“主导”；
+- 没使用过的技术；
+- 没有发生过的项目结果；
+- AI 生成的代码被包装成本人独立编写。
 
-AI 不可以擅自：
+### Resume is an output, not the database
 
-- 编造百分比；
-- 把“参与”写成“主导”；
-- 添加没有使用过的技术；
-- 虚构项目结果；
-- 夸大奖项等级；
-- 把模糊数字改成精确数字。
+长期保存的是经历事实，而不是某一份简历话术。同一段经历可以针对不同岗位用不同角度表达，但底层事实不变。
 
-不确定、推断或模糊的信息必须由用户确认后才能进入事实库。
+### AI participation is an internal truth boundary
 
-### 2. Resume is an output, not the database
+Experience V3 将 AI 参与拆成：
 
-CareerVault 中真正长期保存的是**经历事实**，不是某一份简历。
+- `aiContribution`：AI 做了什么；
+- `userContribution`：本人决定、审查、修改、调试、集成、测试或验证了什么；
+- `interviewPrep`：正式面试前必须准备解释的问题和薄弱点。
 
-同一段经历可以针对不同岗位生成不同表达，但底层事实始终保持一致。
-
-### 3. JD decides what matters
-
-简历不是“把所有经历都塞进一页”。
-
-CareerVault 会先读取目标岗位 JD，再决定：
-
-- 哪些经历应该出现；
-- 哪些项目应该删掉；
-- 每段经历突出什么；
-- 哪些工具 / 方法值得写；
-- 哪些成果最能证明岗位需要的能力。
+这些内部信息不会因为存在于 CareerVault 就自动进入简历正文。
 
 ---
 
-## V1 已实现功能
+## 3. 已实现功能
 
-### 1. 个人档案
+### 3.1 个人档案
 
-保存简历真正需要的基础信息，例如：
+保存简历真正需要的基础信息：姓名、邮箱、电话、求职城市、学校、专业、学历和毕业时间。
 
-- 姓名
-- 邮箱
-- 电话
-- 求职城市
-- 学校
-- 专业
-- 学历
-- 毕业时间
+默认不强制收集年龄、性别、身高、详细住址等低价值或敏感字段。
 
-默认不强制收集年龄、性别、身高、详细住址等低价值或敏感信息。
+### 3.2 Experience V3 经历库
 
----
+支持实习、工作、项目、校园经历、比赛、科研、课程设计和志愿经历。
 
-### 2. 经历库
-
-目前支持：
-
-- 实习
-- 工作
-- 项目
-- 校园经历
-- 比赛
-- 科研
-- 课程设计
-- 志愿经历
-
-每段经历保存的是结构化事实，而不是只有一段“简历话术”：
+一段经历不再只是一个文本框，而是分成：
 
 ```text
 基础信息
@@ -137,325 +104,301 @@ CareerVault 会先读取目标岗位 JD，再决定：
 ├── 岗位 / 项目名
 └── 原始描述
 
-经历事实
+可用于简历的事实
 ├── 具体动作
 ├── 工具 / 技术
-├── 规模
 ├── 结果 / 交付
-├── 个人贡献
-├── 难点
-└── 已确认事实
+├── 规模 / 范围
+├── 个人贡献 / ownership
+├── 难点与处理
+└── 证据 / 可追溯材料
+
+内部真实性信息
+├── 是否 AI 辅助
+├── AI 做了什么
+├── 本人做了什么
+└── 面试准备 / 薄弱点 / 复习主题
 ```
 
-已保存经历支持再次编辑，不需要删除后重新录入。
+旧版 `verifiedFacts[]` 数据会继续兼容并迁移，不要求用户重新录入。
 
----
+### 3.3 HR 风格 AI 追问
 
-### 3. HR 风格 AI 追问
+CareerVault 不给用户一次性扔一整份 STAR 表，而是根据现有事实判断“下一条最值得问什么”。
 
-CareerVault 不会一次丢给用户一大串 STAR 表格。
+系统支持：
 
-它采用**一次只问一个最有价值的问题**的方式，例如：
-
-> 你说“负责公众号运营”，具体做得最多的是选题、文案、排版、发布还是数据分析？
-
-> 大概发布过多少篇？记不清准确数字也可以回答范围。
-
-> 这项工作是你独立完成、主要负责、共同完成，还是辅助参与？
-
-系统会动态判断下一步最值得补什么，而不是机械地按固定顺序提问。
-
-支持：
-
-- 快捷回答；
-- 自由输入；
+- 一次只问一个高价值问题；
+- 快捷回答与自由输入；
 - “不知道 / 记不清 / 没有统计”；
-- 跳过问题；
-- 多事实自动提取；
-- 模糊事实二次确认；
-- 经历信息完整度提示。
+- 重复问题检测；
+- 多事实提取；
+- 模糊内容二次确认；
+- AI 参与边界追问；
+- 面试准备项沉淀；
+- 调用失败时明确报错，不把本地规则伪装成远程 AI。
+
+### 3.4 Vibe Coding / AI Coding 工作区导入
+
+CareerVault 可以生成一段 `CAREERVAULT_IMPORT_V1` Prompt，让真正能访问原代码仓库 / 工作区的 AI 读取 README、代码、Git 历史、测试和配置，并输出可验证事实。
+
+它要求区分：
+
+- AI 生成了什么；
+- 用户做了什么需求定义、架构决策、提示词设计、调试、集成、测试、验收和文档；
+- 哪些信息工作区无法确认，需要本人继续回答。
+
+### 3.5 奖项 / 证书 / 聘书
+
+支持手动录入和图片识别。
+
+图片识别采用多阶段流程：
+
+```text
+原图全文转录
+    ↓
+关键字段视觉复核
+    ↓
+结构化提取与职业价值判断
+```
+
+重点字段包括名称、颁发/主办/聘任单位、日期、奖级/名次/认证等级/职位任期等。
+
+不同类型的材料会使用不同字段提示，例如：
+
+- 证书：发证机构、认证/考试等级；
+- 竞赛：赛事主办方、奖级/名次；
+- 荣誉：评选单位、荣誉称号；
+- 聘书/任命书：出具/聘任单位、职位/任期。
+
+系统同时区分两个概念：
+
+- **识别置信度**：图片字段是否读得可靠；
+- **简历价值**：这项材料是否值得放进目标简历。
+
+二者不是同一个分数。
+
+> PDF 是否可直接送入模型取决于当前 AI Provider。当前 DeepSeek 部署主要使用图片视觉输入；不支持时前端会要求先将 PDF 转成图片，而不是假装已经识别。
+
+### 3.6 岗位库 / JobTarget
+
+CareerVault 不再只有一个会被覆盖的 JD。
+
+每个 `JobTarget` 可以保存：
+
+- 公司；
+- 岗位名称；
+- JD 原文快照；
+- 招聘链接；
+- 投递渠道；
+- 优先级；
+- 当前阶段；
+- 投递日期；
+- 下一步；
+- 简短备注。
+
+保存 JD 原文是为了避免招聘链接下架后，面试前无法恢复当时的岗位要求。
+
+### 3.7 JD 语义匹配
+
+本地规则先进行快速关键词/证据匹配，AI 定制阶段再进行语义重排，因此不要求经历和 JD 使用完全相同的词。
+
+AI 仍只能从经历库中存在的事实进行选材。
+
+### 3.8 Grounded AI Resume
+
+一页简历必须先有目标岗位。
+
+AI 简历写作不是自由生成：每条 bullet 都必须引用 CareerVault 中真实存在的 `fact ID`。服务端会拒绝：
+
+- 不存在的事实引用；
+- 来源事实里没有的新数字；
+- 没有 ownership 证据却写出的“独立 / 主导”；
+- 把 AI 参与和面试准备直接包装成个人成果。
+
+网页预览和 Word `.docx` 导出使用同一套内容。
+
+### 3.9 ResumeVersion 投递快照
+
+同一岗位可以保存多个简历版本。
+
+一旦标记“已投递”，CareerVault 会锁定实际使用的 `ResumeVersion`。后续即使主经历库、JD 或 AI 改写发生变化，也不会修改历史投递快照。
+
+这使系统能够回答：
+
+> **这家公司当时收到的到底是哪一版？**
+
+### 3.10 面试准备与复盘
+
+面试准备基于：
+
+```text
+实际投递 ResumeVersion
++ 当时保存的 JD snapshot
++ 被选中的经历事实
+```
+
+而不是基于今天已经修改过的主数据。
+
+AI 只生成：
+
+- 简历 claim 追问；
+- JD 匹配追问；
+- 技术 / 业务深挖问题；
+- 决策与协作问题；
+- 需要复习的主题；
+- 当前证据缺口。
+
+它不会替用户编“标准答案”。
+
+每轮面试后可以记录实际问题、卡点、讲清楚的内容和下一轮要补什么。复盘会影响下一轮准备优先级，但不会被当作新的简历成果。
+
+### 3.11 求职准备度
+
+Dashboard 不再只统计“填了多少字段”，而是按五个维度判断：
+
+- 基础档案；
+- 经历证据；
+- 目标岗位；
+- 岗位定制简历；
+- 投递后的面试准备。
+
+并给出当前最值得完成的下一动作。
 
 ---
 
-### 4. Vibe Coding / AI Coding 工作区导入
-
-对于 Codex、Claude Code、Cursor、Windsurf、ChatGPT Work 等 AI Coding 项目，CareerVault 提供一段可复制 Prompt。
-
-用户可以把 Prompt 发回原项目工作区，让真正能看到仓库、Git 历史、代码和测试的 AI 自动整理：
-
-- 项目目标；
-- 用户真实负责的部分；
-- 主要功能；
-- 技术栈；
-- 调试 / 集成 / 测试工作；
-- 关键技术决策；
-- 可验证成果；
-- 工作区无法判断、仍需要本人回答的问题。
-
-工作区输出标准 `CAREERVAULT_IMPORT_V1` JSON，粘贴回 CareerVault 即可导入经历库。
-
-这样可以避免对一个复杂项目重新从头口述。
-
----
-
-### 5. 奖项 / 证书库
-
-支持：
-
-- 手动录入；
-- 上传奖状 / 证书图片；
-- GPT 图片识别；
-- 自动提取名称、颁发方、日期、等级等信息；
-- 自动判断简历使用价值；
-- 信息不足时继续追问；
-- 已保存奖项 / 证书再次编辑；
-- 更换图片后重新识别和评估。
-
-系统关注的不只是“这是什么奖”，还会判断：
-
-> **它到底证明了你什么？**
-
-例如会综合考虑：
-
-- 国际 / 国家 / 省市 / 校级 / 企业 / 行业级别；
-- 主办方 / 颁发方；
-- 奖项名次或认证等级；
-- 是否存在筛选性；
-- 与目标岗位的相关性；
-- 用户在获奖项目中真正承担了什么。
-
----
-
-### 6. JD 输入与岗位匹配
-
-JD 支持两种输入方式：
-
-#### 复制粘贴
-
-直接粘贴岗位职责和任职要求。
-
-#### 上传招聘截图
-
-上传招聘平台截图或岗位图片后，由 GPT 视觉模型识别图片中**真实可见的 JD 原文**并自动填入输入框。
-
-识别结果仍可手动修改。
-
-系统不会凭空补写截图里不存在的招聘要求。
-
----
-
-### 7. JD 驱动的一页简历
-
-一页简历必须基于目标岗位 JD 生成。
-
-CareerVault 会：
-
-- 按岗位相关度选择经历；
-- 优先保留强证据；
-- 删除无关技术细节；
-- 每段经历压缩为少量高价值 bullet；
-- 避免把 Git 分支、依赖包、构建命令、开发日志整段放入简历；
-- 根据岗位重新组织同一段经历的表达角度；
-- 根据相关性选择奖项 / 证书；
-- 保持一页优先。
-
-简历版式目前采用克制的一页结构，并预留证件照位置。
-
-支持导出真正的 `.docx` Word 文档，可继续在 Word 中编辑。
-
----
-
-## 数据存储与隐私
+## 4. 数据存储与隐私
 
 CareerVault 采用 **local-first** 设计。
 
-### 默认：IndexedDB
+### IndexedDB
 
-浏览器端数据保存在 IndexedDB：
+默认业务数据保存在当前浏览器 IndexedDB 中。
 
-- 关闭页面后仍保留；
-- 关闭浏览器后仍保留；
-- 电脑重启后仍保留；
-- 不需要注册账号即可使用。
+证书图片等二进制附件与主 Vault JSON 分开保存到独立的 IndexedDB attachment store，避免几十张图片把主状态记录和普通读写拖得越来越大。
 
-但 IndexedDB 不是永久云盘。清空网站数据、重装浏览器或更换设备仍可能导致数据丢失。
+Local-first 的含义是：
 
-因此 CareerVault 同时支持：
+- 不注册账号也可以使用；
+- 关闭浏览器后数据仍保留；
+- 数据默认属于当前浏览器域名；
+- 清理网站数据、换浏览器或换设备仍可能丢失。
 
-- JSON 完整备份导出；
-- JSON 备份恢复。
+因此提供 JSON 备份导出 / 恢复。
 
-### 可选：Supabase 云同步
+### Vercel 与 GitHub Pages
 
-仓库已包含 Supabase 云同步支持和 RLS Schema，可实现：
+推荐正式使用：
 
 ```text
-邮箱 Magic Link 登录
-        ↓
-用户独立数据空间
-        ↓
-跨设备同步 / 恢复
+https://career-vault-sage.vercel.app/
 ```
 
-未配置 Supabase 时不会影响本地使用。
+GitHub Pages 是静态镜像。两个域名拥有各自独立的 IndexedDB，本地数据不会自动互相出现。镜像页面会明确提示这一点。
+
+### Supabase（可选）
+
+支持 Magic Link 登录和可选云同步。恢复前会比较本地/云端更新时间，避免无提示覆盖较新的数据。
+
+当前云同步仍以 Vault payload 为中心；本地附件 Blob store 主要解决浏览器主状态膨胀问题，并不等同于已经实现独立云对象存储。
 
 ---
 
-## AI 架构
+## 5. AI Provider 架构
 
-公开前端**不会包含 OpenAI API Key**。
-
-```text
-GitHub Pages / Vercel Frontend
-              ↓
-      Vercel Serverless API
-              ↓
-       OpenAI Responses API
-```
-
-目前服务端 AI 接口包括：
+当前部署使用 **DeepSeek**，后端采用 Provider Adapter，不把 API Key 放进前端。
 
 ```text
-/api/interview   经历采访与事实提取
-/api/credential  奖状 / 证书识别与评估
-/api/jd          JD 截图识别
+Vercel Frontend / GitHub Pages Mirror
+                 ↓
+        Vercel Serverless API
+                 ↓
+           AI Provider Adapter
+             ↙         ↘
+        DeepSeek      OpenAI-compatible
 ```
 
-前端不会每轮重新发送完整可见聊天记录，而是尽量发送当前结构化经历和最新回答，从而降低上下文冗余。
+主要 API：
 
-如果远程 AI 暂时不可用，经历库的核心本地规则仍然可以继续工作。
+```text
+/api/status          Provider / 模型 / 能力状态
+/api/interview       经历追问与事实提取
+/api/credential      奖项证书图片识别与评估
+/api/jd              JD 图片识别
+/api/resume          事实约束的语义匹配与简历改写
+/api/interview-prep  基于实际投递版本的面试准备
+```
+
+推荐的 DeepSeek 环境变量：
+
+```text
+AI_PROVIDER=deepseek
+AI_API_KEY=your_deepseek_key
+AI_BASE_URL=https://api.deepseek.com
+AI_MODEL=deepseek-flash
+ALLOWED_ORIGIN=https://your-frontend-domain
+```
+
+不要把 `AI_API_KEY` 写入 GitHub、客户端源码或任何 `NEXT_PUBLIC_*` 环境变量。
+
+代码保留 OpenAI-compatible Provider 结构，切换 Provider 不需要重写整个业务层。
 
 ---
 
-## 技术栈
+## 6. 公共部署安全
 
-- **Next.js**
-- **React**
-- **TypeScript**
-- **Lucide Icons**
-- **IndexedDB**
-- **OpenAI Responses API**
-- **Vercel Serverless Functions**
-- **Supabase（可选云同步）**
-- **docx（Word 简历导出）**
-- **GitHub Actions**
-- **GitHub Pages**
+公开版本包含多层基础保护：
+
+- 浏览器侧每日 AI 操作额度；
+- 服务端上游分钟 / 小时级调用上限；
+- 相同请求短时间去重；
+- 单请求 payload / output token 上限；
+- AI 状态和 fallback 明示；
+- 删除和覆盖类操作保护。
+
+如果面向大量陌生用户公开，仍建议在 Vercel Firewall 或外部持久化限流服务中增加真正的 IP / 用户级跨实例限流。
 
 ---
 
-## 本地运行
+## 7. 技术栈
+
+- Next.js 16
+- React 19
+- TypeScript
+- Lucide Icons
+- IndexedDB
+- DeepSeek / OpenAI-compatible Responses API
+- Vercel Serverless Functions
+- Supabase（可选云同步）
+- `docx`（Word 简历）
+- Vitest
+- GitHub Actions
+- GitHub Pages mirror
+
+---
+
+## 8. 本地开发
 
 ```bash
 npm install
 npm run dev
 ```
 
-然后打开：
+默认打开：
 
 ```text
 http://localhost:3000
 ```
 
-类型检查：
+质量检查：
 
 ```bash
 npm run typecheck
-```
-
-生产构建：
-
-```bash
+npm test
 npm run build
 ```
 
----
-
-## OpenAI 配置
-
-请**不要**把 OpenAI API Key 写入前端、GitHub 仓库或任何 `NEXT_PUBLIC_*` 变量。
-
-服务端环境变量：
-
-```text
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=your_model_here
-ALLOWED_ORIGIN=https://your-frontend-domain
-```
-
-推荐把 Key 保存在 Vercel Environment Variables 中。
-
----
-
-## 部署方式
-
-推荐架构：
-
-```text
-Frontend
-GitHub Pages
-
-AI Backend
-Vercel
-
-Optional Cloud Data
-Supabase
-```
-
-仓库已经包含 GitHub Actions CI 和 GitHub Pages 静态部署配置。
-
-当前 Vercel 项目：
-
-https://career-vault-sage.vercel.app/
-
----
-
-## CareerVault 和普通 AI 改简历有什么不同？
-
-| 普通 AI 改简历 | CareerVault |
-| --- | --- |
-| 从一份现有简历开始 | 从个人长期经历资产开始 |
-| 一次性润色 | 经历长期积累、反复复用 |
-| 经常直接“优化措辞” | 先追问事实，再决定怎么写 |
-| 容易自动补量化结果 | 无依据的数据禁止进入事实库 |
-| 一份简历改成另一份 | JD 决定选材和表达 |
-| 用户自己重新讲 AI Coding 项目 | 原工作区可直接导出经历事实 |
-| 奖项只是文本列表 | 图片识别 + 含金量 + 证明力判断 |
-| 输出文本 | 一页简历 + Word 文档 |
-
----
-
-## 当前状态
-
-CareerVault 目前处于 **V1 持续完善阶段**。
-
-已完成核心闭环：
-
-```text
-个人档案
-  +
-经历 / 项目 / 奖项
-  ↓
-AI 追问与事实确认
-  ↓
-职业经历资产库
-  ↓
-JD 文本 / 图片识别
-  ↓
-岗位证据匹配
-  ↓
-一页定制简历
-  ↓
-Word 导出
-```
-
-接下来的重点不是堆更多功能，而是继续提升：
-
-- HR 规则质量；
-- 经历追问质量；
-- JD 语义匹配；
-- 简历 bullet 压缩质量；
-- 云同步体验；
-- 真实招聘场景下的可靠性。
+CI 会依次执行 TypeScript 检查、Vitest 单元测试和 Production Build。
 
 ---
 
@@ -463,280 +406,128 @@ Word 导出
 
 ## What is CareerVault?
 
-CareerVault is a **local-first career memory and AI resume tailoring workspace**.
+CareerVault is a **local-first career evidence vault and AI-assisted job application workspace**.
 
-Most AI resume tools start with an existing resume and rewrite it. CareerVault starts earlier:
+Most resume tools start from an existing resume. CareerVault starts earlier: it helps you preserve what you actually did, what you personally owned, what evidence exists, and what remains uncertain. Those verified facts can then be reused across multiple job targets without rewriting your history every time.
 
-> **What did you actually do, what can be verified, and what should matter for this specific role?**
-
-Instead of storing only resume wording, CareerVault stores reusable career evidence. The same verified experience can later be reframed for engineering, product, operations, research, or other roles without changing the underlying facts.
-
----
-
-## The problem
-
-People often forget the useful details behind internships, projects, competitions and campus work. Months later, an experience becomes a vague sentence such as:
-
-> “Worked on CAD drawings.”
-
-or:
-
-> “Helped operate a social media account.”
-
-A generic AI can rewrite those sentences, but it cannot safely invent the missing evidence.
-
-CareerVault therefore treats resume writing as an evidence problem first and a writing problem second.
-
----
-
-## Core workflow
+The product flow is:
 
 ```text
-Real experience
-      ↓
-HR-style AI interview
-      ↓
-Verified structured evidence
-      ↓
-Target job description
-      ↓
-Evidence-to-role matching
-      ↓
-Tailored one-page resume
-      ↓
-Editable Word document
+Career facts and credentials
+          ↓
+AI-guided fact completion
+          ↓
+Structured evidence vault
+          ↓
+JobTarget + saved JD snapshot
+          ↓
+Semantic evidence matching
+          ↓
+Fact-grounded one-page resume
+          ↓
+Immutable ResumeVersion submitted snapshot
+          ↓
+Interview preparation from the exact submitted version
+          ↓
+Interview debrief for the next round
 ```
 
----
+## Key principles
 
-## Key features
+**Facts are the source of truth.** AI may rewrite or compress known facts, but it must not invent metrics, technologies, ownership, outcomes, awards, or responsibilities.
 
-### Personal profile
+**The resume is an output, not the database.** Career history is stored as reusable structured evidence. A single experience can be expressed differently for different JDs without changing the underlying facts.
 
-Store only useful resume information such as contact details, education, major, degree and graduation date.
+**AI participation is tracked truthfully.** AI-generated code is not silently presented as independently authored work. CareerVault separates what AI assisted with from what the user personally decided, reviewed, modified, debugged, integrated, tested, or validated.
 
-### Experience Vault
+## Current capabilities
 
-Supports internships, work experience, projects, campus activities, competitions, research, coursework and volunteering.
+- Local-first personal profile
+- Experience V3 structured evidence model
+- Adaptive AI HR follow-up
+- Vibe Coding / AI Coding workspace import
+- Credential and appointment-letter image recognition
+- Separate recognition confidence and resume-value assessment
+- Multiple `JobTarget` records with frozen JD snapshots
+- Semantic JD-to-experience matching
+- Grounded resume bullets with fact-ID validation
+- Editable one-page preview and real `.docx` export
+- Immutable `ResumeVersion` application snapshots
+- Interview preparation based on the exact submitted resume and JD
+- Interview debrief loop without converting debrief notes into fake achievements
+- Explainable job-readiness dashboard
+- JSON backup / restore
+- Optional Supabase cloud sync
+- DeepSeek-first provider adapter with OpenAI-compatible support
+- AI usage safeguards and explicit provider/fallback status
+- Vitest unit tests in CI
 
-Each experience can contain structured evidence such as:
+## Data model highlights
 
-- concrete actions;
-- tools and technologies;
-- scale;
-- outcomes and deliverables;
-- ownership;
-- challenges;
-- verified facts.
+### Experience V3
 
-Saved experiences can be edited at any time.
-
-### HR-style follow-up interview
-
-CareerVault asks **one high-value question at a time** instead of presenting a large STAR form.
-
-It can:
-
-- extract multiple facts from one answer;
-- ask for scale, ownership, outcomes or evidence;
-- accept approximate answers without forcing fake precision;
-- let users skip unknown questions;
-- require confirmation before saving inferred or ambiguous claims.
-
-### Vibe Coding / AI Coding workspace import
-
-CareerVault can generate a prompt for Codex, Claude Code, Cursor, Windsurf, ChatGPT Work and similar coding workspaces.
-
-The original workspace can inspect the repository, Git history, tests and implementation details, then return structured `CAREERVAULT_IMPORT_V1` JSON containing:
-
-- project purpose;
-- actual user contribution;
-- technical decisions;
-- implemented features;
-- testing / debugging / integration work;
-- verifiable results;
-- remaining questions that only the user can answer.
-
-This avoids re-explaining a complex AI-assisted project from scratch.
-
-### Awards & Credentials
-
-Users can manually enter an award or upload an image.
-
-CareerVault can:
-
-- read certificate images;
-- extract the name, issuer, date and level;
-- estimate resume usefulness;
-- evaluate what the credential actually proves;
-- ask follow-up questions when ownership or significance is unclear;
-- edit saved credentials later;
-- replace an image and re-run analysis.
-
-### Job Description input
-
-Job descriptions can be added by:
-
-- copy and paste;
-- uploading a screenshot or job-posting image.
-
-The vision endpoint extracts only text that is actually visible in the image. The result remains editable before matching.
-
-### JD-driven resume generation
-
-CareerVault does not generate a generic “best resume”.
-
-A target JD is required first.
-
-The system then:
-
-- ranks experiences by relevance;
-- selects defensible evidence;
-- removes implementation noise;
-- compresses each experience into a small number of high-value bullets;
-- chooses relevant awards and credentials;
-- keeps the resume concise and one-page oriented.
-
-The resume can be exported as a real `.docx` Word document and edited further in Microsoft Word.
-
----
-
-## AI safety principle
-
-> **Facts are the source of truth. AI may extract, rank and reframe facts, but it must not invent them.**
-
-CareerVault must not fabricate:
-
-- metrics;
-- ownership;
-- technologies;
-- outcomes;
-- dates;
-- award levels;
-- skill proficiency.
-
-Ambiguous or inferred claims stay pending until the user confirms or edits them.
-
----
-
-## Data & privacy
-
-CareerVault is **local-first**.
-
-By default, browser data is stored in IndexedDB. It survives normal page closes, browser restarts and computer restarts, but it can still be lost when site data is cleared or when switching devices.
-
-Users can therefore export and restore a complete JSON backup.
-
-Optional Supabase cloud sync is supported through magic-link authentication and Row Level Security.
-
----
-
-## Architecture
+Resume-safe evidence is separated from internal truth and interview preparation:
 
 ```text
-GitHub Pages / Vercel frontend
-              ↓
-      Vercel Serverless API
-              ↓
-       OpenAI Responses API
-
-Optional persistence
-              ↓
-           Supabase
+Experience
+├─ actions / tools / outcomes
+├─ evidence
+│  ├─ scale
+│  ├─ ownership
+│  ├─ difficulties
+│  └─ artifacts
+├─ aiContext
+│  ├─ assisted
+│  ├─ aiContribution
+│  └─ userContribution
+└─ interviewPrep
+   ├─ questions
+   ├─ weakPoints
+   └─ topicsToReview
 ```
 
-Server-side AI routes:
+### Job applications
+
+Each target preserves its own JD and application context. A submitted application references a frozen `ResumeVersion`, so later edits cannot rewrite history.
+
+### Credential attachments
+
+Credential binary data is stored separately from the main IndexedDB Vault record. Runtime previews are hydrated when needed, while the normal structured state remains lightweight.
+
+## AI configuration
+
+Recommended DeepSeek configuration:
 
 ```text
-/api/interview   experience interviewing and fact extraction
-/api/credential  credential image analysis and evaluation
-/api/jd          job-description screenshot extraction
+AI_PROVIDER=deepseek
+AI_API_KEY=your_deepseek_key
+AI_BASE_URL=https://api.deepseek.com
+AI_MODEL=deepseek-flash
+ALLOWED_ORIGIN=https://your-frontend-domain
 ```
 
-The OpenAI API key is never exposed to the public frontend.
+Never expose the API key through client-side code or `NEXT_PUBLIC_*` variables.
 
----
+## Deployment
 
-## Tech stack
+**Primary app:** https://career-vault-sage.vercel.app/
 
-- Next.js
-- React
-- TypeScript
-- Lucide Icons
-- IndexedDB
-- OpenAI Responses API
-- Vercel Serverless Functions
-- Supabase (optional)
-- docx
-- GitHub Actions
-- GitHub Pages
-
----
+GitHub Pages is maintained as a static mirror. Because IndexedDB is origin-scoped, local data from the Vercel domain does not automatically appear on the GitHub Pages domain.
 
 ## Development
 
 ```bash
 npm install
 npm run dev
-```
-
-Type checking:
-
-```bash
 npm run typecheck
-```
-
-Production build:
-
-```bash
+npm test
 npm run build
 ```
 
----
+## Status
 
-## OpenAI configuration
-
-Never expose an OpenAI API key through client-side code or `NEXT_PUBLIC_*` variables.
-
-Configure the server environment instead:
-
-```text
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=your_model_here
-ALLOWED_ORIGIN=https://your-frontend-domain
-```
-
-Vercel Environment Variables are the recommended location for these secrets.
-
----
-
-## Project status
-
-CareerVault is currently in active **V1 development**.
-
-The main end-to-end workflow is already implemented:
-
-```text
-Profile
-+ Experiences / Projects / Credentials
-                ↓
-       AI fact interviewing
-                ↓
-       Career evidence vault
-                ↓
-     JD text / image extraction
-                ↓
-       Evidence-role matching
-                ↓
-       Tailored one-page resume
-                ↓
-            Word export
-```
-
-The next stage focuses on quality rather than feature count: better HR rules, better interviewing, stronger semantic matching, better resume compression and more reliable cloud sync.
-
----
+CareerVault is an actively developed project. The current priority is reliability, truth-preserving AI behavior, clear data ownership, and a coherent workflow from career evidence to a defensible application — not automatic mass application or invented interview answers.
 
 ## License
 
-A license has not yet been selected for this repository. Please review the repository terms before redistributing or incorporating the project into another product.
+See `LICENSE`.
