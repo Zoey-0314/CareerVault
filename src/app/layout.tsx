@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./resume-reference.css";
+import "./job-workspace.css";
 import { ProviderUiSync } from "@/components/ProviderUiSync";
 
 export const metadata: Metadata = {

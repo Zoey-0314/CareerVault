@@ -97,16 +97,62 @@ export interface JobMatch {
   matchedKeywords: string[];
 }
 
+export type JobTargetStatus = "saved" | "ready" | "applied" | "assessment" | "interview" | "offer" | "closed";
+export type JobTargetPriority = "high" | "medium" | "low";
+
+export interface JobTarget {
+  id: string;
+  company: string;
+  role: string;
+  jd: string;
+  sourceUrl: string;
+  channel: string;
+  status: JobTargetStatus;
+  priority: JobTargetPriority;
+  appliedAt: string;
+  notes: string;
+  nextAction: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Exact saved resume snapshot linked to the submitted application. */
+  submittedResumeVersionId?: string;
+}
+
+export interface ResumeVersionExperience {
+  experienceId: string;
+  bullets: string[];
+}
+
+export interface ResumeVersion {
+  id: string;
+  jobTargetId: string;
+  createdAt: string;
+  label: string;
+  targetRole: string;
+  summary: string;
+  selectedExperienceIds: string[];
+  experienceBullets: ResumeVersionExperience[];
+  credentialIds: string[];
+  provider: "deterministic" | "openai" | "deepseek";
+  model?: string;
+  /** The JD is copied into the version so future edits to a target cannot change what this version was generated against. */
+  jdSnapshot: string;
+}
+
 export interface ResumeDraft {
   summary: string;
   selectedExperienceIds: string[];
 }
 
 export interface VaultState {
-  version: 2 | 3;
+  version: 2 | 3 | 4;
   profile: Profile;
   experiences: Experience[];
   credentials: Credential[];
+  /** Backward-compatible active JD alias. New code should persist full targets in jobTargets. */
   jd: string;
+  jobTargets?: JobTarget[];
+  resumeVersions?: ResumeVersion[];
+  activeJobTargetId?: string;
   updatedAt: string;
 }

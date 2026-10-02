@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, Download, FileText, Loader2, Sparkles, Target } from "lucide-react";
+import { Archive, Check, Download, FileText, Loader2, Sparkles, Target } from "lucide-react";
 import { sortCredentials } from "@/lib/credentials";
+import { newResumeVersionId } from "@/lib/jobApplication";
 import { buildTargetedResumeBullets, buildTargetedSummary, inferTargetRole } from "@/lib/resume";
 import { generateGroundedResumeDraft, type GroundedResumeDraft } from "@/lib/resumeAi";
 import { downloadResumeDocx } from "@/lib/resumeDocx";
-import type { Credential, Experience, JobMatch, Profile } from "@/lib/types";
+import type { Credential, Experience, JobMatch, Profile, ResumeVersion } from "@/lib/types";
 
 interface ResumePanelProps {
   profile: Profile;
@@ -14,6 +15,8 @@ interface ResumePanelProps {
   experiences: Experience[];
   matches: JobMatch[];
   credentials: Credential[];
+  activeJobTargetId?: string;
+  onSaveVersion?: (version: ResumeVersion) => void;
   onGoToJob: () => void;
 }
 
@@ -28,11 +31,12 @@ const typeLabel: Record<Experience["type"], string> = {
   volunteer: "志愿经历",
 };
 
-export function ResumePanel({ profile, jd, experiences, matches, credentials, onGoToJob }: ResumePanelProps) {
+export function ResumePanel({ profile, jd, experiences, matches, credentials, activeJobTargetId, onSaveVersion, onGoToJob }: ResumePanelProps) {
   const [exporting, setExporting] = useState(false);
   const [aiDraft, setAiDraft] = useState<GroundedResumeDraft | null>(null);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [snapshotNote, setSnapshotNote] = useState("");
 
   const deterministicMatches = useMemo(() => {
     if (!jd.trim()) return [];
@@ -72,10 +76,17 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, on
 
   const summary = useMemo(() => buildTargetedSummary(profile, selectedExperiences, keywords), [profile, selectedExperiences, keywords]);
 
+  function currentBullets(experience: Experience) {
+    const aiSelection = aiSelectionMap.get(experience.id);
+    if (aiSelection) return aiSelection.bullets.map((bullet) => bullet.text);
+    return buildTargetedResumeBullets(experience, matchMap.get(experience.id)?.matchedKeywords || []);
+  }
+
   async function runAiTailoring() {
     if (!jd.trim() || !experiences.length || aiGenerating) return;
     setAiGenerating(true);
     setAiError("");
+    setSnapshotNote("");
     try {
       const result = await generateGroundedResumeDraft(jd, experiences);
       setAiDraft(result);
@@ -85,6 +96,27 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, on
     } finally {
       setAiGenerating(false);
     }
+  }
+
+  function saveSnapshot() {
+    if (!activeJobTargetId || !onSaveVersion || !selectedExperiences.length) return;
+    const createdAt = new Date().toISOString();
+    const version: ResumeVersion = {
+      id: newResumeVersionId(),
+      jobTargetId: activeJobTargetId,
+      createdAt,
+      label: `${targetRole} · ${new Date(createdAt).toLocaleString(undefined, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`,
+      targetRole,
+      summary,
+      selectedExperienceIds: selectedExperiences.map((item) => item.id),
+      experienceBullets: selectedExperiences.map((item) => ({ experienceId: item.id, bullets: currentBullets(item) })),
+      credentialIds: resumeCredentials.map((item) => item.id),
+      provider: aiDraft?.provider || "deterministic",
+      model: aiDraft?.model,
+      jdSnapshot: jd,
+    };
+    onSaveVersion(version);
+    setSnapshotNote("已保存为独立投递快照。之后即使你修改经历库、JD 或重新 AI 改写，这一版也不会变化。 ");
   }
 
   async function exportWord() {
@@ -108,8 +140,8 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, on
   if (!jd.trim()) {
     return (
       <section className="sectionStack">
-        <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME</span><h2>先有岗位，再生成简历。</h2><p>CareerVault 不生成“万能简历”。先粘贴目标岗位 JD，系统才会决定选哪些经历、强调哪些能力、删掉哪些无关信息。</p></div>
-        <article className="resumeGate panel"><Target size={24} /><div><strong>还没有目标 JD</strong><span>输入 JD 后才会解锁岗位定制简历和 Word 导出。</span></div><button className="button primary" onClick={onGoToJob}>去粘贴岗位 JD</button></article>
+        <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME</span><h2>先有岗位，再生成简历。</h2><p>CareerVault 不生成“万能简历”。先在岗位库里保存目标岗位和 JD，系统才会决定选哪些经历、强调哪些能力。</p></div>
+        <article className="resumeGate panel"><Target size={24} /><div><strong>还没有当前岗位</strong><span>先选择或创建岗位，投递版简历才会和它永久关联。</span></div><button className="button primary" onClick={onGoToJob}>去岗位库</button></article>
       </section>
     );
   }
@@ -132,13 +164,15 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, on
     <section className="sectionStack">
       <div className="resumeToolbar">
         <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME · JD TAILORED</span><h2>{targetRole}</h2><p>{aiDraft ? "AI 已按 JD 做语义选材和事实约束改写；每条 bullet 都必须引用 CareerVault 中真实存在的事实。" : "当前先使用确定性规则选材；可运行 AI 定制进行语义匹配和专业改写。"}</p></div>
-        <div className="buttonRow"><button className="button secondary" disabled={aiGenerating} onClick={runAiTailoring}>{aiGenerating ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}{aiGenerating ? "AI 定制中" : aiDraft ? "重新 AI 定制" : "AI 定制简历"}</button><button className="button primary resumeExport" disabled={exporting} onClick={exportWord}>{exporting ? <Loader2 className="spin" size={16} /> : <Download size={16} />}{exporting ? "正在生成 Word" : "导出 Word"}</button></div>
+        <div className="buttonRow"><button className="button secondary" disabled={aiGenerating} onClick={runAiTailoring}>{aiGenerating ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}{aiGenerating ? "AI 定制中" : aiDraft ? "重新 AI 定制" : "AI 定制简历"}</button><button className="button secondary" disabled={!activeJobTargetId || !onSaveVersion} onClick={saveSnapshot}><Archive size={16} />保存投递版快照</button><button className="button primary resumeExport" disabled={exporting} onClick={exportWord}>{exporting ? <Loader2 className="spin" size={16} /> : <Download size={16} />}{exporting ? "正在生成 Word" : "导出 Word"}</button></div>
       </div>
 
       <div className="ruleBar">
-        <span><Check size={13} />必须先输入 JD</span><span><Check size={13} />单段经历 1–3 条</span><span><Check size={13} />AI bullet 必须引用事实</span><span><Check size={13} />Word 与网页同一套内容</span>
+        <span><Check size={13} />必须先保存岗位 JD</span><span><Check size={13} />单段经历 1–3 条</span><span><Check size={13} />AI bullet 必须引用事实</span><span><Check size={13} />投递版保存后不随主档变化</span>
       </div>
       {aiDraft && <p className="inlineNote"><Sparkles size={13} /> {aiDraft.provider === "deepseek" ? "DeepSeek" : "OpenAI"}{aiDraft.model ? ` · ${aiDraft.model}` : ""} · 已通过事实引用、数字和 ownership 基础校验</p>}
+      {!activeJobTargetId && <p className="inlineNote">当前 JD 不是岗位库中的目标，无法保存投递快照。先回到岗位库创建或选择岗位。</p>}
+      {snapshotNote && <p className="inlineNote">{snapshotNote}</p>}
       {aiError && <p className="inlineNote">{aiError}</p>}
 
       <article className="resumeSheet referenceResume">
@@ -149,9 +183,8 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, on
 
         <div className="resumeBand"><strong>相关经历</strong><em>Experience</em></div>
         {selectedExperiences.map((item) => {
-          const match = matchMap.get(item.id);
           const aiSelection = aiSelectionMap.get(item.id);
-          const bullets = aiSelection?.bullets.map((bullet) => bullet.text) || buildTargetedResumeBullets(item, match?.matchedKeywords || []);
+          const bullets = currentBullets(item);
           return <section className="referenceRow referenceExperience" key={item.id}><div className="referenceMeta"><strong>{item.startDate || "开始"} – {item.endDate || "至今"}</strong><span>{typeLabel[item.type]}</span><span>{item.title}</span></div><div className="referenceContent"><strong>{item.organization}</strong>{aiSelection?.matchReasons?.length ? <p>{aiSelection.matchReasons.slice(0, 2).join(" · ")}</p> : null}<ul>{bullets.map((text) => <li key={text}>{text}</li>)}</ul></div></section>;
         })}
 

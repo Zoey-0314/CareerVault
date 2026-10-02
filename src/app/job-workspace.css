@@ -1,0 +1,60 @@
+.jobWorkspaceGrid {
+  display: grid;
+  grid-template-columns: minmax(230px, .38fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.jobTargetRail {
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 42px);
+  overflow: auto;
+}
+
+.jobTargetList { display: grid; gap: 8px; }
+.jobTargetItem {
+  width: 100%;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  text-align: left;
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+}
+.jobTargetItem:hover { border-color: #c8c8c0; }
+.jobTargetItem.active { border-color: #aeb6af; background: var(--accent-soft); }
+.jobTargetItem strong { font-size: 12px; }
+.jobTargetItem > span:not(.jobTargetStatus) { color: var(--muted); font-size: 11px; }
+.jobTargetItem small { color: var(--muted-2); font-size: 9px; }
+.jobTargetStatus {
+  width: fit-content;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #efeee8;
+  color: var(--accent-dark);
+  font-size: 9px;
+  font-weight: 800;
+}
+.jobTargetDetail { min-width: 0; }
+.inputWithIcon { position: relative; }
+.inputWithIcon > svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted-2); pointer-events: none; }
+.inputWithIcon input { padding-left: 34px; }
+.versionList { display: grid; border-top: 1px solid var(--line-soft); }
+.versionRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.versionRow strong { display: block; font-size: 11px; }
+.versionRow span:not(.softTag) { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.versionRow .softTag { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .jobWorkspaceGrid { grid-template-columns: 1fr; }
+  .jobTargetRail { position: static; max-height: none; }
+  .jobTargetList { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .jobTargetList { grid-template-columns: 1fr; }
+  .versionRow { align-items: flex-start; flex-direction: column; }
+}

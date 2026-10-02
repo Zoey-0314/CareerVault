@@ -1,5 +1,6 @@
 import { normalizeExperienceV3 } from "@/lib/experienceModel";
-import type { VaultState } from "@/lib/types";
+import { legacyTargetFromJd, normalizeJobTarget } from "@/lib/jobApplication";
+import type { ResumeVersion, VaultState } from "@/lib/types";
 
 const DB_NAME = "careervault";
 const STORE_NAME = "vault";
@@ -20,12 +21,31 @@ function openDb(): Promise<IDBDatabase> {
 
 function emptyState(): VaultState {
   return {
-    version: 3,
+    version: 4,
     profile: { name: "", email: "", phone: "", city: "", school: "", major: "", degree: "", graduation: "" },
     experiences: [],
     credentials: [],
     jd: "",
+    jobTargets: [],
+    resumeVersions: [],
+    activeJobTargetId: "",
     updatedAt: new Date().toISOString(),
+  };
+}
+
+function normalizeResumeVersion(value: ResumeVersion): ResumeVersion | null {
+  if (!value || typeof value !== "object" || !value.id || !value.jobTargetId) return null;
+  return {
+    ...value,
+    createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date().toISOString(),
+    label: typeof value.label === "string" ? value.label : "投递版简历",
+    targetRole: typeof value.targetRole === "string" ? value.targetRole : "目标岗位",
+    summary: typeof value.summary === "string" ? value.summary : "",
+    selectedExperienceIds: Array.isArray(value.selectedExperienceIds) ? value.selectedExperienceIds : [],
+    experienceBullets: Array.isArray(value.experienceBullets) ? value.experienceBullets : [],
+    credentialIds: Array.isArray(value.credentialIds) ? value.credentialIds : [],
+    provider: value.provider === "openai" || value.provider === "deepseek" ? value.provider : "deterministic",
+    jdSnapshot: typeof value.jdSnapshot === "string" ? value.jdSnapshot : "",
   };
 }
 
@@ -34,14 +54,32 @@ function normalizeState(value: Partial<VaultState> | null | undefined): VaultSta
   const experiences = Array.isArray(value?.experiences)
     ? value!.experiences!.map((experience) => normalizeExperienceV3(experience))
     : [];
+  const legacyJd = typeof value?.jd === "string" ? value.jd : "";
+  const jobTargets = Array.isArray(value?.jobTargets)
+    ? value!.jobTargets!.map((target) => normalizeJobTarget(target))
+    : legacyJd.trim()
+      ? [legacyTargetFromJd(legacyJd)]
+      : [];
+  const requestedActive = typeof value?.activeJobTargetId === "string" ? value.activeJobTargetId : "";
+  const activeJobTargetId = jobTargets.some((target) => target.id === requestedActive)
+    ? requestedActive
+    : jobTargets[0]?.id || "";
+  const activeTarget = jobTargets.find((target) => target.id === activeJobTargetId);
+  const resumeVersions = Array.isArray(value?.resumeVersions)
+    ? value!.resumeVersions!.map((item) => normalizeResumeVersion(item)).filter(Boolean) as ResumeVersion[]
+    : [];
+
   return {
     ...base,
     ...value,
-    version: 3,
+    version: 4,
     profile: { ...base.profile, ...(value?.profile || {}) },
     experiences,
     credentials: Array.isArray(value?.credentials) ? value!.credentials! : [],
-    jd: typeof value?.jd === "string" ? value.jd : "",
+    jd: activeTarget?.jd || legacyJd,
+    jobTargets,
+    resumeVersions,
+    activeJobTargetId,
     updatedAt: typeof value?.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
   };
 }
@@ -102,12 +140,12 @@ export async function saveVaultState(state: VaultState): Promise<void> {
 }
 
 export function createBackup(state: VaultState): string {
-  return JSON.stringify({ kind: "CAREERVAULT_BACKUP_V3", exportedAt: new Date().toISOString(), state: normalizeState(state) }, null, 2);
+  return JSON.stringify({ kind: "CAREERVAULT_BACKUP_V4", exportedAt: new Date().toISOString(), state: normalizeState(state) }, null, 2);
 }
 
 export function parseBackup(text: string): VaultState {
   const parsed = JSON.parse(text) as { kind?: string; state?: Partial<VaultState> } | Partial<VaultState>;
-  if ("kind" in parsed && (parsed.kind === "CAREERVAULT_BACKUP_V3" || parsed.kind === "CAREERVAULT_BACKUP_V2") && parsed.state) {
+  if ("kind" in parsed && ["CAREERVAULT_BACKUP_V4", "CAREERVAULT_BACKUP_V3", "CAREERVAULT_BACKUP_V2"].includes(parsed.kind || "") && parsed.state) {
     return normalizeState(parsed.state);
   }
   return normalizeState(parsed as Partial<VaultState>);
