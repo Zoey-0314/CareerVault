@@ -1,4 +1,4 @@
-import type { Experience, InterviewPrepPlan, ResumeVersion } from "@/lib/types";
+import type { Experience, InterviewDebrief, InterviewPrepPlan, ResumeVersion } from "@/lib/types";
 
 const DEFAULT_PUBLIC_PROXY = "https://career-vault-sage.vercel.app/api/interview-prep";
 
@@ -23,13 +23,17 @@ async function readError(response: Response) {
   return new Error(`${payload?.detail || payload?.error || `面试准备生成失败（${response.status}）`} [${provider}${model}]`);
 }
 
-export async function generateInterviewPrep(resumeVersion: ResumeVersion, experiences: Experience[]): Promise<InterviewPrepPlan> {
+export async function generateInterviewPrep(
+  resumeVersion: ResumeVersion,
+  experiences: Experience[],
+  debriefs: InterviewDebrief[] = [],
+): Promise<InterviewPrepPlan> {
   const url = endpoint();
   if (!url) throw new Error("当前部署未配置面试准备服务。");
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ resumeVersion, experiences }),
+    body: JSON.stringify({ resumeVersion, experiences, debriefs: debriefs.slice(0, 5) }),
   });
   if (!response.ok) throw await readError(response);
   const payload = await response.json() as Omit<InterviewPrepPlan, "generatedAt" | "resumeVersionId">;
