@@ -1,3 +1,4 @@
+import { applyStructuredFact, hasStructuredGoal, normalizeExperienceV3 } from "@/lib/experienceModel";
 import type { Experience, ExperienceType } from "@/lib/types";
 import { analyzeInterviewTurn, applyConfirmedAgentFacts } from "@/lib/interviewAgent";
 
@@ -30,9 +31,7 @@ const typePrompts: Record<ExperienceType, Partial<Record<InterviewGoal, Omit<Int
     specificity: { question: "你在这段实习里最常做的具体任务是什么？不要写‘负责某某’，直接告诉我你实际做了什么。", why: "HR 更关心你亲手执行过什么，而不是岗位职责说明。", options: ["检查/审核", "设计/制图", "数据整理", "开发/自动化", "沟通协调", "其他"], placeholder: "例如：逐张检查机械工程图中的 BOM、标准件和图号" },
     scale: { question: "这项工作大概覆盖了多少对象或多少次？记不清准确数字也可以给范围。", why: "规模能帮助 HR 判断你的实际参与深度。", options: ["少于20", "20–50", "50–100", "100+", "没有统计"], placeholder: "例如：累计检查约100+张工程图" },
   },
-  work: {
-    specificity: { question: "你这份工作里最能代表你能力的一项实际任务是什么？", why: "先找到最有证明力的工作内容，再决定简历怎么写。", options: ["项目执行", "客户/用户", "数据分析", "流程优化", "团队协作", "其他"], placeholder: "写一个你真实做过的具体任务" },
-  },
+  work: { specificity: { question: "你这份工作里最能代表你能力的一项实际任务是什么？", why: "先找到最有证明力的工作内容，再决定简历怎么写。", options: ["项目执行", "客户/用户", "数据分析", "流程优化", "团队协作", "其他"], placeholder: "写一个你真实做过的具体任务" } },
   project: {
     specificity: { question: "这个项目最终要解决什么问题？你本人具体负责哪一块？", why: "项目经历最容易把团队成果写成个人成果，必须先分清你的贡献。", options: ["前端/界面", "后端/接口", "算法/模型", "测试/验证", "设计/方案", "其他"], placeholder: "例如：负责测试执行模块与结果验证" },
     ownership: { question: "这一块工作你承担到什么程度？", why: "‘主导、负责、参与、协助’代表完全不同的贡献程度，CareerVault 不会替你夸大。", options: ["独立完成", "主要负责", "共同完成", "参与其中", "辅助支持"], placeholder: "也可以具体说明你与队友如何分工" },
@@ -41,18 +40,10 @@ const typePrompts: Record<ExperienceType, Partial<Record<InterviewGoal, Omit<Int
     specificity: { question: "这段校园经历里，你真正做了哪些事情？先别写‘锻炼了沟通能力’。", why: "软能力必须用具体行为证明，空泛评价对 HR 的信息量很低。", options: ["活动策划", "公众号/内容", "组织协调", "招新/培训", "宣传设计", "其他"], placeholder: "例如：负责公众号文案、排版和发布" },
     scale: { question: "这件事持续多久、做了多少次，或者影响了多少人？", why: "校园经历如果有明确规模，会比‘参加了某活动’更有说服力。", options: ["1次活动", "3–5次", "10+次", "持续1学期", "持续1年", "没有统计"], placeholder: "例如：一年内累计发布30+篇内容" },
   },
-  competition: {
-    specificity: { question: "比赛中你个人负责哪一部分？", why: "奖项是团队结果，HR 仍然需要知道你能独立说明和承担什么。", options: ["方案设计", "技术实现", "数据分析", "答辩展示", "材料撰写", "其他"], placeholder: "写清楚你的个人分工" },
-  },
-  research: {
-    specificity: { question: "这项研究具体在研究什么？你负责哪一步？", why: "科研经历要体现研究问题、方法和个人贡献，而不是只写课题名称。", options: ["文献调研", "实验设计", "数据处理", "建模/仿真", "论文撰写", "其他"], placeholder: "例如：负责实验数据清洗和统计分析" },
-  },
-  coursework: {
-    specificity: { question: "这门课程设计最终交付了什么？你具体完成了哪些部分？", why: "课程项目也可以有价值，但要写成可验证的专业实践，而不是‘完成课程作业’。", options: ["设计方案", "建模", "编程", "实验", "报告", "其他"], placeholder: "例如：完成六杆机构建模、运动分析与报告" },
-  },
-  volunteer: {
-    specificity: { question: "你在这段志愿经历里具体提供了什么服务或承担什么任务？", why: "志愿经历同样要用行动与结果呈现，而不是只写参与。", options: ["现场执行", "组织协调", "宣传", "培训", "服务支持", "其他"], placeholder: "写一个具体任务" },
-  },
+  competition: { specificity: { question: "比赛中你个人负责哪一部分？", why: "奖项是团队结果，HR 仍然需要知道你能独立说明和承担什么。", options: ["方案设计", "技术实现", "数据分析", "答辩展示", "材料撰写", "其他"], placeholder: "写清楚你的个人分工" } },
+  research: { specificity: { question: "这项研究具体在研究什么？你负责哪一步？", why: "科研经历要体现研究问题、方法和个人贡献，而不是只写课题名称。", options: ["文献调研", "实验设计", "数据处理", "建模/仿真", "论文撰写", "其他"], placeholder: "例如：负责实验数据清洗和统计分析" } },
+  coursework: { specificity: { question: "这门课程设计最终交付了什么？你具体完成了哪些部分？", why: "课程项目也可以有价值，但要写成可验证的专业实践，而不是‘完成课程作业’。", options: ["设计方案", "建模", "编程", "实验", "报告", "其他"], placeholder: "例如：完成六杆机构建模、运动分析与报告" } },
+  volunteer: { specificity: { question: "你在这段志愿经历里具体提供了什么服务或承担什么任务？", why: "志愿经历同样要用行动与结果呈现，而不是只写参与。", options: ["现场执行", "组织协调", "宣传", "培训", "服务支持", "其他"], placeholder: "写一个具体任务" } },
 };
 
 const generic: Record<InterviewGoal, Omit<InterviewQuestion, "id" | "goal">> = {
@@ -66,20 +57,22 @@ const generic: Record<InterviewGoal, Omit<InterviewQuestion, "id" | "goal">> = {
 };
 
 function hasScale(experience: Experience): boolean {
-  const text = [experience.rawDescription, experience.actions, experience.outcomes, ...experience.verifiedFacts].join(" ");
-  return /\d|多张|多次|多人|百余|数十|若干|余份|余篇|余场/.test(text);
+  const normalized = normalizeExperienceV3(experience);
+  const text = [normalized.rawDescription, normalized.actions, normalized.outcomes, ...normalized.evidence!.scale].join(" ");
+  return normalized.evidence!.scale.length > 0 || /\d|多张|多次|多人|百余|数十|若干|余份|余篇|余场/.test(text);
 }
 
 export function getExperienceReadiness(experience: Experience): { score: number; items: ReadinessItem[]; label: string } {
+  const normalized = normalizeExperienceV3(experience);
   const items: ReadinessItem[] = [
-    { key: "basic", label: "基础信息", complete: Boolean(experience.title.trim() && experience.organization.trim() && experience.rawDescription.trim()) },
-    { key: "specificity", label: "具体动作", complete: experience.actions.trim().length >= 8 },
-    { key: "tool", label: "工具/方法", complete: Boolean(experience.tools.trim()) },
-    { key: "scale", label: "工作规模", complete: hasScale(experience) },
-    { key: "result", label: "结果/交付", complete: experience.outcomes.trim().length >= 6 },
-    { key: "ownership", label: "个人贡献", complete: experience.verifiedFacts.some((fact) => /独立|主要负责|共同完成|参与其中|辅助支持|个人负责/.test(fact)) },
-    { key: "difficulty", label: "难点/解决", complete: experience.verifiedFacts.some((fact) => fact.startsWith("难点：")) },
-    { key: "evidence", label: "证明材料", complete: experience.verifiedFacts.some((fact) => fact.startsWith("证据：")) },
+    { key: "basic", label: "基础信息", complete: Boolean(normalized.title.trim() && normalized.organization.trim() && normalized.rawDescription.trim()) },
+    { key: "specificity", label: "具体动作", complete: normalized.actions.trim().length >= 8 },
+    { key: "tool", label: "工具/方法", complete: Boolean(normalized.tools.trim()) },
+    { key: "scale", label: "工作规模", complete: hasScale(normalized) },
+    { key: "result", label: "结果/交付", complete: normalized.outcomes.trim().length >= 6 },
+    { key: "ownership", label: "个人贡献", complete: hasStructuredGoal(normalized, "ownership") },
+    { key: "difficulty", label: "难点/解决", complete: hasStructuredGoal(normalized, "difficulty") },
+    { key: "evidence", label: "证明材料", complete: hasStructuredGoal(normalized, "evidence") },
   ];
   const weights: Record<string, number> = { basic: 20, specificity: 22, tool: 12, scale: 12, result: 18, ownership: 8, difficulty: 5, evidence: 3 };
   const score = items.reduce((sum, item) => sum + (item.complete ? weights[item.key] : 0), 0);
@@ -118,16 +111,10 @@ function applyQuestionFallback(experience: Experience, question: InterviewQuesti
   if (question.goal === "specificity") return { ...experience, actions: mergeText(experience.actions, value) };
   if (question.goal === "tool") return { ...experience, tools: mergeText(experience.tools, value) };
   if (question.goal === "result") return { ...experience, outcomes: mergeText(experience.outcomes, value) };
-
-  const prefix: Record<Exclude<InterviewGoal, "specificity" | "tool" | "result">, string> = {
-    scale: "规模：",
-    ownership: "个人贡献：",
-    difficulty: "难点：",
-    evidence: "证据：",
-  };
-  const fact = `${prefix[question.goal as keyof typeof prefix]}${value}`;
-  if (experience.verifiedFacts.includes(fact)) return experience;
-  return { ...experience, verifiedFacts: [...experience.verifiedFacts, fact] };
+  if (question.goal === "scale") return applyStructuredFact(experience, "scale", value);
+  if (question.goal === "ownership") return applyStructuredFact(experience, "ownership", value);
+  if (question.goal === "difficulty") return applyStructuredFact(experience, "difficulty", value);
+  return applyStructuredFact(experience, "evidence", value);
 }
 
 export function applyInterviewAnswer(experience: Experience, question: InterviewQuestion, answer: string): Experience {
@@ -137,9 +124,7 @@ export function applyInterviewAnswer(experience: Experience, question: Interview
   const analysis = analyzeInterviewTurn(value, experience);
   const next = applyConfirmedAgentFacts(experience, analysis);
   const currentGoalFacts = analysis.extractedFacts.filter((fact) => fact.goal === question.goal);
-
   if (currentGoalFacts.some((fact) => fact.status === "confirmed")) return next;
   if (currentGoalFacts.some((fact) => fact.status === "needs_confirmation")) return next;
-
   return applyQuestionFallback(next, question, value);
 }

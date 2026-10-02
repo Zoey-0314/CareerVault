@@ -1,4 +1,5 @@
 import { detectLowSignalText, getExperienceEvidenceStrength } from "@/lib/hrRules";
+import { getResumeEvidenceFacts, normalizeExperienceV3 } from "@/lib/experienceModel";
 import type { Experience, JobMatch } from "@/lib/types";
 
 const STOP_WORDS = new Set([
@@ -30,19 +31,16 @@ function tokenize(text: string): string[] {
     .slice(0, 180);
 }
 
-function isInternalInterviewFact(text: string): boolean {
-  return /^\s*(AI参与|面试准备)\s*[：:]/.test(text);
-}
-
 function experienceText(experience: Experience): string {
+  const normalized = normalizeExperienceV3(experience);
   return [
-    experience.title,
-    experience.organization,
-    experience.rawDescription,
-    experience.actions,
-    experience.tools,
-    experience.outcomes,
-    ...experience.verifiedFacts.filter((fact) => !isInternalInterviewFact(fact)),
+    normalized.title,
+    normalized.organization,
+    normalized.rawDescription,
+    normalized.actions,
+    normalized.tools,
+    normalized.outcomes,
+    ...getResumeEvidenceFacts(normalized),
   ].join(" ");
 }
 
@@ -68,18 +66,19 @@ export function matchExperiences(jd: string, experiences: Experience[]): JobMatc
 }
 
 export function getFollowUpQuestions(experience: Experience): string[] {
+  const normalized = normalizeExperienceV3(experience);
   const questions: string[] = [];
-  const combined = `${experience.rawDescription} ${experience.actions} ${experience.outcomes}`;
+  const combined = `${normalized.rawDescription} ${normalized.actions} ${normalized.outcomes}`;
   const lowSignal = detectLowSignalText(combined);
-  const resumeFacts = experience.verifiedFacts.filter((fact) => !isInternalInterviewFact(fact));
+  const resumeFacts = getResumeEvidenceFacts(normalized);
 
-  if (!experience.actions.trim()) {
+  if (!normalized.actions.trim()) {
     questions.push("如果我是 HR，我最想先知道：这件事里你本人具体做了什么？请用“设计、分析、开发、检查、策划、协调”等动作描述，而不是只写‘参与’。 ");
   }
-  if (!experience.tools.trim()) {
+  if (!normalized.tools.trim()) {
     questions.push("你完成这项任务时具体用了什么工具、软件、方法或流程？这能帮助 HR 判断你的能力是否可迁移到目标岗位。");
   }
-  if (!experience.outcomes.trim()) {
+  if (!normalized.outcomes.trim()) {
     questions.push("最后交付了什么、解决了什么问题，或产生了什么可验证变化？没有准确数字就不要猜，可以写成品、报告、上线功能、完成数量或流程变化。");
   }
   if (resumeFacts.length === 0) {
@@ -88,10 +87,10 @@ export function getFollowUpQuestions(experience: Experience): string[] {
   if (lowSignal.length > 0) {
     questions.push(`你用了“${lowSignal[0]}”这类 HR 很难验证的表述。能否换成一个具体行为或案例来证明它？`);
   }
-  if (experience.rawDescription.trim().length < 30) {
+  if (normalized.rawDescription.trim().length < 30 && normalized.evidence!.difficulties.length === 0) {
     questions.push("这段经历里最难、最能体现你能力的一件事是什么？当时为什么难，你是怎么处理的？");
   }
-  if (!/\d/.test(combined) && resumeFacts.every((fact) => !/\d/.test(fact))) {
+  if (!/\d/.test(combined) && normalized.evidence!.scale.length === 0 && resumeFacts.every((fact) => !/\d/.test(fact))) {
     questions.push("这段经历有没有自然存在的规模信息？例如人数、数量、周期、覆盖范围。只有你确定的数据才写，不需要为了量化硬编数字。");
   }
 

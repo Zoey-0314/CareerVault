@@ -1,9 +1,10 @@
-import { detectLowSignalText, getExperienceEvidenceStrength } from "@/lib/hrRules";
+import { getExperienceEvidenceStrength } from "@/lib/hrRules";
+import { getResumeEvidenceFacts, normalizeExperienceV3 } from "@/lib/experienceModel";
 import type { Experience, Profile } from "@/lib/types";
 
 function cleanLowSignal(text: string): string {
   let result = text;
-  for (const phrase of detectLowSignalText(text)) result = result.replaceAll(phrase, "");
+  for (const phrase of ["积极", "认真", "负责", "良好", "较强", "熟练掌握"]) result = result.replaceAll(phrase, "");
   return result.replace(/[；，,]{2,}/g, "；").replace(/^[-•\s]+/, "").trim();
 }
 
@@ -13,10 +14,6 @@ function clauses(text: string): string[] {
     .map((item) => cleanLowSignal(item))
     .map((item) => item.replace(/^\d+[、.．]\s*/, "").trim())
     .filter((item) => item.length >= 6);
-}
-
-function isInternalInterviewFact(text: string): boolean {
-  return /^\s*(AI参与|面试准备)\s*[：:]/.test(text);
 }
 
 function unique(items: string[]): string[] {
@@ -44,20 +41,21 @@ export interface ProfessionalBullet {
 }
 
 export function buildTargetedResumeBullets(experience: Experience, matchedKeywords: string[]): string[] {
+  const normalized = normalizeExperienceV3(experience);
   const keywordSet = matchedKeywords.map((item) => item.toLowerCase()).filter(Boolean);
-  const resumeFacts = experience.verifiedFacts.filter((fact) => !isInternalInterviewFact(fact));
+  const resumeFacts = getResumeEvidenceFacts(normalized);
   const candidates = unique([
-    ...clauses(experience.actions),
-    ...clauses(experience.outcomes),
+    ...clauses(normalized.actions),
+    ...clauses(normalized.outcomes),
     ...resumeFacts.flatMap(clauses),
-    ...clauses(experience.rawDescription),
-  ]).filter((item) => !isInternalInterviewFact(item));
+    ...clauses(normalized.rawDescription),
+  ]);
 
   const ranked = candidates
     .map((text, index) => {
       const lower = text.toLowerCase();
       const keywordHits = keywordSet.filter((keyword) => lower.includes(keyword)).length;
-      const hasResultSignal = /完成|交付|上线|修复|降低|提升|通过|负责|设计|开发|分析|检查|策划|协调|生成|部署|验证|实现|优化/.test(text);
+      const hasResultSignal = /完成|交付|上线|修复|降低|提升|通过|设计|开发|分析|检查|策划|协调|生成|部署|验证|实现|优化/.test(text);
       const hasEvidence = /\d/.test(text) || resumeFacts.some((fact) => fact.includes(text) || text.includes(fact));
       return { text, score: keywordHits * 6 + (hasResultSignal ? 2 : 0) + (hasEvidence ? 2 : 0) - index * 0.05 };
     })
@@ -68,21 +66,23 @@ export function buildTargetedResumeBullets(experience: Experience, matchedKeywor
   const bullets = pool.slice(0, 3).map((item) => trimBullet(item.text));
 
   if (!bullets.length) {
-    const fallback = trimBullet(cleanLowSignal(experience.actions || experience.outcomes || experience.rawDescription));
-    return fallback && !isInternalInterviewFact(fallback) ? [fallback] : [];
+    const fallback = trimBullet(cleanLowSignal(normalized.actions || normalized.outcomes || normalized.rawDescription));
+    return fallback ? [fallback] : [];
   }
   return bullets;
 }
 
 export function buildProfessionalResumeBullet(experience: Experience): ProfessionalBullet {
-  const text = buildTargetedResumeBullets(experience, []).join("；");
+  const normalized = normalizeExperienceV3(experience);
+  const text = buildTargetedResumeBullets(normalized, []).join("；");
   const rationale: string[] = [];
   const warnings: string[] = [];
-  if (experience.actions) rationale.push("优先保留具体动作，而不是岗位职责堆叠");
-  if (experience.outcomes) rationale.push("保留可验证结果或交付");
-  if (experience.verifiedFacts.some((fact) => !isInternalInterviewFact(fact))) rationale.push("优先使用已确认事实");
-  if (experience.verifiedFacts.some((fact) => /^\s*AI参与\s*[：:]/.test(fact))) warnings.push("AI 参与信息仅用于真实性边界与面试准备，不会自动写入简历正文");
-  if (!experience.outcomes) warnings.push("缺少结果/交付，建议继续追问后再投递");
+  const resumeFacts = getResumeEvidenceFacts(normalized);
+  if (normalized.actions) rationale.push("优先保留具体动作，而不是岗位职责堆叠");
+  if (normalized.outcomes) rationale.push("保留可验证结果或交付");
+  if (resumeFacts.length > 0) rationale.push("优先使用已确认的结构化事实");
+  if (normalized.aiContext?.assisted) warnings.push("AI 参与信息仅用于真实性边界与面试准备，不会自动写入简历正文");
+  if (!normalized.outcomes) warnings.push("缺少结果/交付，建议继续追问后再投递");
   return { text: text || "这段经历信息不足，建议先补充具体动作和结果。", rationale, reasons: rationale, warnings };
 }
 

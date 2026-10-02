@@ -19,6 +19,35 @@ export interface Profile {
   graduation: string;
 }
 
+export interface ExperienceEvidence {
+  /** Natural scope/quantity facts the user can defend. */
+  scale: string[];
+  /** What the user personally owned, decided, reviewed, changed or delivered. */
+  ownership: string[];
+  /** Difficulties and how the user handled them. */
+  difficulties: string[];
+  /** Repositories, reports, files, demos, certificates or other traceable proof. */
+  artifacts: string[];
+}
+
+export interface ExperienceAiContext {
+  /** null means not discussed yet. */
+  assisted: boolean | null;
+  /** What AI generated or assisted with. Internal truth boundary; never a resume claim by itself. */
+  aiContribution: string[];
+  /** What the user personally decided, reviewed, modified, debugged, integrated, tested or validated. */
+  userContribution: string[];
+}
+
+export interface ExperienceInterviewPrep {
+  /** Concrete questions/topics the candidate should be ready to explain truthfully. */
+  questions: string[];
+  /** Known weak points or unclear areas to review before an interview. */
+  weakPoints: string[];
+  /** Technical/product topics worth reviewing; not invented answers. */
+  topicsToReview: string[];
+}
+
 export interface Experience {
   id: string;
   type: ExperienceType;
@@ -30,7 +59,15 @@ export interface Experience {
   actions: string;
   tools: string;
   outcomes: string;
+  /**
+   * Legacy free-form fact list retained for backward compatibility with existing local/cloud backups.
+   * New structured facts should be written to evidence/aiContext/interviewPrep instead.
+   */
   verifiedFacts: string[];
+  evidence?: ExperienceEvidence;
+  aiContext?: ExperienceAiContext;
+  interviewPrep?: ExperienceInterviewPrep;
+  schemaVersion?: 3;
   source?: "manual" | "workspace";
 }
 
@@ -77,7 +114,8 @@ export interface ResumeDraft {
 }
 
 export interface VaultState {
-  version: 2;
+  /** V2 is accepted only for in-memory/backward-compatible callers; persistence normalizes to V3. */
+  version: 2 | 3;
   profile: Profile;
   experiences: Experience[];
   credentials: Credential[];
