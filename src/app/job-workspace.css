@@ -48,6 +48,42 @@
 .versionRow span:not(.softTag) { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
 .versionRow .softTag { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 
+.prepQuestions { display: grid; border-top: 1px solid var(--line-soft); }
+.prepQuestion {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 11px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.prepQuestion > span {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 10px;
+  font-weight: 800;
+}
+.prepQuestion small { display: block; color: var(--accent); font-size: 9px; font-weight: 800; letter-spacing: .05em; }
+.prepQuestion strong { display: block; margin-top: 4px; font-size: 12px; line-height: 1.55; }
+.prepQuestion p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.prepGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.prepGrid > div { border: 1px solid var(--line-soft); border-radius: 12px; background: #f6f5f0; padding: 14px; }
+.prepGrid ul { margin: 10px 0 0; padding-left: 17px; color: #4c514b; font-size: 10px; line-height: 1.65; }
+.prepGrid li + li { margin-top: 5px; }
+
+.debriefPanel > label, .debriefPanel > .formGrid { margin-bottom: 14px; }
+.debriefHistory { display: grid; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.debriefRecord { border: 1px solid var(--line-soft); border-radius: 12px; background: #f7f6f2; padding: 12px; }
+.debriefRecord > div { display: flex; justify-content: space-between; gap: 12px; }
+.debriefRecord strong { font-size: 11px; }
+.debriefRecord span { color: var(--muted-2); font-size: 9px; }
+.debriefRecord p { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.debriefRecord b { color: var(--ink); }
+
 @media (max-width: 900px) {
   .jobWorkspaceGrid { grid-template-columns: 1fr; }
   .jobTargetRail { position: static; max-height: none; }
@@ -57,4 +93,5 @@
 @media (max-width: 620px) {
   .jobTargetList { grid-template-columns: 1fr; }
   .versionRow { align-items: flex-start; flex-direction: column; }
+  .prepGrid { grid-template-columns: 1fr; }
 }

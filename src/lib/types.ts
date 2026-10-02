@@ -61,7 +61,6 @@ export type CredentialType = "award" | "certificate" | "honor" | "competition" |
 export type CredentialLevel = "international" | "national" | "provincial" | "city" | "school" | "organization" | "industry" | "unknown";
 
 export interface CredentialAssessment {
-  /** Resume value score. This is NOT OCR/recognition confidence. */
   score: number;
   tier: "旗舰" | "高价值" | "有效" | "补充" | "信息不足";
   level: CredentialLevel;
@@ -69,7 +68,6 @@ export interface CredentialAssessment {
   whatItProves: string;
   followUpQuestion?: string;
   needsConfirmation: boolean;
-  /** Confidence that uploaded document fields were read correctly; undefined for manual-only entries. */
   recognitionConfidence?: number;
   recognitionLabel?: "高" | "中" | "低";
   recognitionNotes?: string[];
@@ -97,6 +95,39 @@ export interface JobMatch {
   matchedKeywords: string[];
 }
 
+export type InterviewPrepCategory = "resume_claim" | "jd_requirement" | "technical_depth" | "behavioral";
+
+export interface InterviewPrepQuestion {
+  id: string;
+  category: InterviewPrepCategory;
+  question: string;
+  why: string;
+  experienceId?: string;
+}
+
+export interface InterviewPrepPlan {
+  generatedAt: string;
+  resumeVersionId: string;
+  provider: "openai" | "deepseek";
+  model?: string;
+  questions: InterviewPrepQuestion[];
+  reviewTopics: string[];
+  evidenceGaps: string[];
+  warnings: string[];
+}
+
+export interface InterviewDebrief {
+  id: string;
+  round: string;
+  occurredAt: string;
+  questionsAsked: string[];
+  stumbles: string[];
+  whatWentWell: string[];
+  followUps: string[];
+  notes: string;
+  createdAt: string;
+}
+
 export type JobTargetStatus = "saved" | "ready" | "applied" | "assessment" | "interview" | "offer" | "closed";
 export type JobTargetPriority = "high" | "medium" | "low";
 
@@ -114,8 +145,9 @@ export interface JobTarget {
   nextAction: string;
   createdAt: string;
   updatedAt: string;
-  /** Exact saved resume snapshot linked to the submitted application. */
   submittedResumeVersionId?: string;
+  interviewPrep?: InterviewPrepPlan;
+  interviewDebriefs?: InterviewDebrief[];
 }
 
 export interface ResumeVersionExperience {
@@ -135,7 +167,6 @@ export interface ResumeVersion {
   credentialIds: string[];
   provider: "deterministic" | "openai" | "deepseek";
   model?: string;
-  /** The JD is copied into the version so future edits to a target cannot change what this version was generated against. */
   jdSnapshot: string;
 }
 
@@ -149,7 +180,6 @@ export interface VaultState {
   profile: Profile;
   experiences: Experience[];
   credentials: Credential[];
-  /** Backward-compatible active JD alias. New code should persist full targets in jobTargets. */
   jd: string;
   jobTargets?: JobTarget[];
   resumeVersions?: ResumeVersion[];

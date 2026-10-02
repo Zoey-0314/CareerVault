@@ -39,6 +39,8 @@ export function createEmptyJobTarget(seed?: Partial<JobTarget>): JobTarget {
     createdAt: seed?.createdAt || now,
     updatedAt: seed?.updatedAt || now,
     submittedResumeVersionId: seed?.submittedResumeVersionId,
+    interviewPrep: seed?.interviewPrep,
+    interviewDebriefs: Array.isArray(seed?.interviewDebriefs) ? seed!.interviewDebriefs : [],
   };
 }
 
@@ -58,6 +60,10 @@ export function legacyTargetFromJd(jd: string): JobTarget {
 
 export function newResumeVersionId() {
   return id("resume");
+}
+
+export function newInterviewDebriefId() {
+  return id("debrief");
 }
 
 export function latestResumeVersionForTarget(versions: ResumeVersion[], jobTargetId: string) {
