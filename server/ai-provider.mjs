@@ -10,6 +10,15 @@ function positiveInt(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+export function getAiSafetyLimits() {
+  return {
+    minuteLimit: positiveInt(process.env.AI_MAX_UPSTREAM_CALLS_PER_MINUTE, 30),
+    hourLimit: positiveInt(process.env.AI_MAX_UPSTREAM_CALLS_PER_HOUR, 300),
+    maxOutputTokens: positiveInt(process.env.AI_MAX_OUTPUT_TOKENS, 2200),
+    maxPayloadBytes: positiveInt(process.env.AI_MAX_UPSTREAM_PAYLOAD_BYTES, 4_800_000),
+  };
+}
+
 function getRateState() {
   if (!globalThis[RATE_STATE_KEY]) globalThis[RATE_STATE_KEY] = { timestamps: [] };
   return globalThis[RATE_STATE_KEY];
@@ -17,8 +26,7 @@ function getRateState() {
 
 function consumeAiBudget() {
   const now = Date.now();
-  const minuteLimit = positiveInt(process.env.AI_MAX_UPSTREAM_CALLS_PER_MINUTE, 120);
-  const hourLimit = positiveInt(process.env.AI_MAX_UPSTREAM_CALLS_PER_HOUR, 1200);
+  const { minuteLimit, hourLimit } = getAiSafetyLimits();
   const state = getRateState();
   state.timestamps = state.timestamps.filter((time) => now - time < 60 * 60 * 1000);
   const lastMinute = state.timestamps.filter((time) => now - time < 60 * 1000).length;
@@ -32,6 +40,23 @@ function consumeAiBudget() {
   }
   state.timestamps.push(now);
   return { allowed: true, minuteLimit, hourLimit };
+}
+
+function safeJsonSize(value) {
+  try { return Buffer.byteLength(JSON.stringify(value), "utf8"); }
+  catch { return Number.POSITIVE_INFINITY; }
+}
+
+function localErrorResponse(status, code, message, extraHeaders = {}) {
+  const payload = { error: { code, message } };
+  const upstream = new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...extraHeaders,
+    },
+  });
+  return { upstream, payload };
 }
 
 export function getAiProvider() {
@@ -67,28 +92,37 @@ export function extractOutputText(payload) {
 }
 
 export async function createResponse(config, body) {
+  const limits = getAiSafetyLimits();
+  const preparedBody = { ...body };
+  if (Number.isFinite(Number(preparedBody.max_output_tokens))) {
+    preparedBody.max_output_tokens = Math.min(Number(preparedBody.max_output_tokens), limits.maxOutputTokens);
+  } else {
+    preparedBody.max_output_tokens = limits.maxOutputTokens;
+  }
+
+  const payloadBytes = safeJsonSize(preparedBody);
+  if (payloadBytes > limits.maxPayloadBytes) {
+    return localErrorResponse(
+      413,
+      "careervault_payload_too_large",
+      `本次 AI 请求过大（约 ${Math.ceil(payloadBytes / 1024)} KB），已在发送给模型前拦截。请缩小图片、减少文本长度或改为分段处理。`,
+    );
+  }
+
   const budget = consumeAiBudget();
   if (!budget.allowed) {
-    const payload = {
-      error: {
-        code: "careervault_rate_limited",
-        message: "CareerVault 的公共 AI 调用暂时达到安全上限，请稍后再试。",
-      },
-    };
-    const upstream = new Response(JSON.stringify(payload), {
-      status: 429,
-      headers: {
-        "Content-Type": "application/json",
-        "Retry-After": String(budget.retryAfterSeconds),
-      },
-    });
-    return { upstream, payload };
+    return localErrorResponse(
+      429,
+      "careervault_rate_limited",
+      "CareerVault 的公共 AI 调用暂时达到安全上限，请稍后再试。",
+      { "Retry-After": String(budget.retryAfterSeconds) },
+    );
   }
 
   const upstream = await fetch(config.responsesUrl, {
     method: "POST",
     headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(preparedBody),
   });
   const payload = await upstream.json().catch(() => ({}));
   return { upstream, payload };
