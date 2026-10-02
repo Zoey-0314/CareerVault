@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./resume-reference.css";
 import "./job-workspace.css";
+import "./structured-experience.css";
 import { DeploymentNotice } from "@/components/DeploymentNotice";
 import { ProviderUiSync } from "@/components/ProviderUiSync";
 
