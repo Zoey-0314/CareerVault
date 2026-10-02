@@ -81,8 +81,12 @@ export interface Credential {
   date: string;
   rank: string;
   description: string;
+  /** Runtime preview only. Persisted local state stores the binary in the attachment object store. */
   imageDataUrl?: string;
+  /** Runtime upload payload only. Persisted local state stores the binary in the attachment object store. */
   attachmentDataUrl?: string;
+  /** Stable pointer to the local IndexedDB attachment object store. */
+  attachmentId?: string;
   attachmentName?: string;
   attachmentType?: string;
   assessment?: CredentialAssessment;

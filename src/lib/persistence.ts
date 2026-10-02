@@ -1,18 +1,28 @@
 import { normalizeExperienceV3 } from "@/lib/experienceModel";
 import { legacyTargetFromJd, normalizeJobTarget } from "@/lib/jobApplication";
-import type { ResumeVersion, VaultState } from "@/lib/types";
+import type { Credential, ResumeVersion, VaultState } from "@/lib/types";
 
 const DB_NAME = "careervault";
+const DB_VERSION = 2;
 const STORE_NAME = "vault";
+const ATTACHMENT_STORE_NAME = "attachments";
 const STATE_KEY = "state-v2";
 const LEGACY_KEY = "careervault-v1";
 
+type StoredAttachment = {
+  blob: Blob;
+  name: string;
+  type: string;
+  updatedAt: string;
+};
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+      if (!db.objectStoreNames.contains(ATTACHMENT_STORE_NAME)) db.createObjectStore(ATTACHMENT_STORE_NAME);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -84,32 +94,177 @@ function normalizeState(value: Partial<VaultState> | null | undefined): VaultSta
   };
 }
 
-async function idbGet(): Promise<VaultState | null> {
-  if (typeof indexedDB === "undefined") return null;
-  const db = await openDb();
+function attachmentIdFor(credential: Credential): string {
+  return credential.attachmentId || `credential:${credential.id}`;
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [meta, payload = ""] = dataUrl.split(",", 2);
+  const mime = /data:([^;]+)/.exec(meta)?.[1] || "application/octet-stream";
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mime });
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const request = tx.objectStore(STORE_NAME).get(STATE_KEY);
-    request.onsuccess = () => resolve(request.result ? normalizeState(request.result as VaultState) : null);
-    request.onerror = () => reject(request.error);
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
   });
 }
 
-async function idbSet(state: VaultState): Promise<void> {
+async function putAttachment(id: string, record: StoredAttachment): Promise<void> {
   if (typeof indexedDB === "undefined") return;
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).put(normalizeState(state), STATE_KEY);
+    const tx = db.transaction(ATTACHMENT_STORE_NAME, "readwrite");
+    tx.objectStore(ATTACHMENT_STORE_NAME).put(record, id);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
 }
 
+async function getAttachment(id: string): Promise<StoredAttachment | null> {
+  if (typeof indexedDB === "undefined") return null;
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(ATTACHMENT_STORE_NAME, "readonly");
+    const request = tx.objectStore(ATTACHMENT_STORE_NAME).get(id);
+    request.onsuccess = () => resolve((request.result as StoredAttachment | undefined) || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function externalizeCredentialAttachments(state: VaultState): Promise<VaultState> {
+  if (typeof indexedDB === "undefined") return state;
+  const credentials: Credential[] = [];
+  for (const credential of state.credentials) {
+    const source = credential.attachmentDataUrl || credential.imageDataUrl;
+    if (!source?.startsWith("data:")) {
+      credentials.push(credential);
+      continue;
+    }
+    const attachmentId = attachmentIdFor(credential);
+    try {
+      const blob = dataUrlToBlob(source);
+      await putAttachment(attachmentId, {
+        blob,
+        name: credential.attachmentName || "credential",
+        type: credential.attachmentType || blob.type || "application/octet-stream",
+        updatedAt: new Date().toISOString(),
+      });
+      credentials.push({ ...credential, attachmentId });
+    } catch {
+      credentials.push(credential);
+    }
+  }
+  return { ...state, credentials };
+}
+
+function stripRuntimeAttachmentData(state: VaultState): VaultState {
+  return {
+    ...state,
+    credentials: state.credentials.map((credential) => {
+      const hasExternalAttachment = Boolean(credential.attachmentId || credential.attachmentDataUrl || credential.imageDataUrl);
+      if (!hasExternalAttachment) return credential;
+      const attachmentId = attachmentIdFor(credential);
+      return {
+        ...credential,
+        attachmentId,
+        imageDataUrl: undefined,
+        attachmentDataUrl: undefined,
+      };
+    }),
+  };
+}
+
+async function hydrateCredentialAttachments(state: VaultState): Promise<VaultState> {
+  if (typeof indexedDB === "undefined") return state;
+  const credentials: Credential[] = [];
+  for (const credential of state.credentials) {
+    if (credential.attachmentDataUrl || credential.imageDataUrl || !credential.attachmentId) {
+      credentials.push(credential);
+      continue;
+    }
+    try {
+      const record = await getAttachment(credential.attachmentId);
+      if (!record) {
+        credentials.push(credential);
+        continue;
+      }
+      const dataUrl = await blobToDataUrl(record.blob);
+      credentials.push({
+        ...credential,
+        attachmentDataUrl: dataUrl,
+        imageDataUrl: record.type.startsWith("image/") ? dataUrl : undefined,
+        attachmentName: credential.attachmentName || record.name,
+        attachmentType: credential.attachmentType || record.type,
+      });
+    } catch {
+      credentials.push(credential);
+    }
+  }
+  return { ...state, credentials };
+}
+
+async function pruneUnusedAttachments(state: VaultState): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  const referenced = new Set(state.credentials
+    .filter((credential) => credential.attachmentId || credential.attachmentDataUrl || credential.imageDataUrl)
+    .map((credential) => attachmentIdFor(credential)));
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(ATTACHMENT_STORE_NAME, "readwrite");
+    const store = tx.objectStore(ATTACHMENT_STORE_NAME);
+    const request = store.getAllKeys();
+    request.onsuccess = () => {
+      for (const key of request.result) {
+        const id = String(key);
+        if (!referenced.has(id)) store.delete(key);
+      }
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbGetRaw(): Promise<VaultState | null> {
+  if (typeof indexedDB === "undefined") return null;
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const request = tx.objectStore(STORE_NAME).get(STATE_KEY);
+    request.onsuccess = () => resolve(request.result ? request.result as VaultState : null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function idbSetRaw(state: VaultState): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).put(stripRuntimeAttachmentData(normalizeState(state)), STATE_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function prepareLocalState(value: Partial<VaultState>): Promise<VaultState> {
+  const normalized = normalizeState(value);
+  const externalized = await externalizeCredentialAttachments(normalized);
+  await idbSetRaw(externalized).catch(() => undefined);
+  await pruneUnusedAttachments(externalized).catch(() => undefined);
+  return hydrateCredentialAttachments(externalized);
+}
+
 export async function loadVaultState(): Promise<VaultState> {
   try {
-    const current = await idbGet();
-    if (current) return current;
+    const current = await idbGetRaw();
+    if (current) return await prepareLocalState(current);
   } catch {
     // Fall through to migration/local fallback.
   }
@@ -119,9 +274,7 @@ export async function loadVaultState(): Promise<VaultState> {
     if (legacy) {
       try {
         const parsed = JSON.parse(legacy) as Partial<VaultState>;
-        const migrated = normalizeState(parsed);
-        await idbSet(migrated).catch(() => undefined);
-        return migrated;
+        return await prepareLocalState(parsed);
       } catch {
         // Ignore malformed legacy data.
       }
@@ -133,9 +286,11 @@ export async function loadVaultState(): Promise<VaultState> {
 export async function saveVaultState(state: VaultState): Promise<void> {
   const next = normalizeState({ ...state, updatedAt: new Date().toISOString() });
   try {
-    await idbSet(next);
+    const externalized = await externalizeCredentialAttachments(next);
+    await idbSetRaw(externalized);
+    await pruneUnusedAttachments(externalized).catch(() => undefined);
   } catch {
-    if (typeof localStorage !== "undefined") localStorage.setItem(LEGACY_KEY, JSON.stringify(next));
+    if (typeof localStorage !== "undefined") localStorage.setItem(LEGACY_KEY, JSON.stringify(stripRuntimeAttachmentData(next)));
   }
 }
 
