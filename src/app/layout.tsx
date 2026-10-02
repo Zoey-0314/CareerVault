@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./resume-reference.css";
 import "./job-workspace.css";
+import { DeploymentNotice } from "@/components/DeploymentNotice";
 import { ProviderUiSync } from "@/components/ProviderUiSync";
 
 export const metadata: Metadata = {
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body>
         {children}
+        <DeploymentNotice />
         <ProviderUiSync />
       </body>
     </html>
