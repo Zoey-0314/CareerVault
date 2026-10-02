@@ -29,6 +29,18 @@ function compactSelectedExperiences(experiences, selectedIds) {
   }));
 }
 
+function compactDebriefs(debriefs) {
+  return (Array.isArray(debriefs) ? debriefs : []).slice(0, 5).map((item) => ({
+    round: String(item?.round || ""),
+    occurredAt: String(item?.occurredAt || ""),
+    questionsAsked: unique(item?.questionsAsked).slice(0, 12),
+    stumbles: unique(item?.stumbles).slice(0, 10),
+    whatWentWell: unique(item?.whatWentWell).slice(0, 10),
+    followUps: unique(item?.followUps).slice(0, 10),
+    notes: String(item?.notes || "").slice(0, 1200),
+  }));
+}
+
 const schema = {
   type: "object", additionalProperties: false,
   properties: {
@@ -43,17 +55,18 @@ const schema = {
 };
 
 const instructions = `You are CareerVault's interview-preparation planner.
-You receive the EXACT resume snapshot that was submitted and the JD snapshot used for that resume. You also receive structured facts for only the selected experiences.
+You receive the EXACT resume snapshot that was submitted and the JD snapshot used for that resume. You also receive structured facts for only the selected experiences and, when available, RECENT INTERVIEW DEBRIEFS written by the candidate.
 
 GOAL
-Create a concise interview preparation plan for the candidate to review before this specific interview.
+Create a concise interview preparation plan for the candidate to review before this specific interview or next round.
 
 RULES
 - Do NOT write model answers and do NOT invent facts.
-- Questions must be grounded in either a submitted resume bullet, the saved JD, or structured facts supplied here.
+- Questions must be grounded in either a submitted resume bullet, the saved JD, structured facts supplied here, or an actual prior interview question/stumble/follow-up from RECENT INTERVIEW DEBRIEFS.
 - Prioritize questions interviewers commonly ask to verify claims: what the candidate personally did, why a design choice was made, project/business value, upstream/downstream dependencies, debugging/failure handling, test/validation approach, and measurable scope/result when already evidenced.
 - When aiContext says AI assisted substantially, include a truthful boundary question about what AI did vs what the candidate personally decided/reviewed/debugged/integrated/tested. Do not treat AI use itself as a negative signal.
-- `reviewTopics` are concrete topics the candidate should revise; do not pretend the candidate already knows them.
+- RECENT INTERVIEW DEBRIEFS are candidate-reported history, NOT new career achievements. Use actual questions, stumbles and follow-ups to raise the priority of weak topics for the next round. Never convert debrief notes into resume facts or stronger claims.
+- `reviewTopics` are concrete topics the candidate should revise; do not pretend the candidate already knows them. Put unresolved prior stumbles/follow-ups near the top when they remain relevant.
 - `evidenceGaps` are JD requirements for which the submitted resume snapshot has weak or no direct evidence. Phrase them as preparation risks, not missing achievements.
 - Never strengthen ownership. Never create numbers, tools, systems, responsibilities or outcomes not present in the input.
 - Generate 6-10 questions total, ordered by interview value.
@@ -97,6 +110,7 @@ export default async function handler(req, res) {
 
   const resumeVersion = req.body?.resumeVersion;
   const experiences = Array.isArray(req.body?.experiences) ? req.body.experiences : [];
+  const debriefs = compactDebriefs(req.body?.debriefs);
   if (!resumeVersion?.id || !resumeVersion?.jdSnapshot) return json(res, 400, { error: "submitted_resume_required", detail: "请先保存并锁定实际投递的简历版本。" }, responseOrigin);
   const selectedIds = Array.isArray(resumeVersion.selectedExperienceIds) ? resumeVersion.selectedExperienceIds : [];
   const selectedExperiences = compactSelectedExperiences(experiences, selectedIds);
@@ -110,6 +124,7 @@ export default async function handler(req, res) {
       experienceBullets: Array.isArray(resumeVersion.experienceBullets) ? resumeVersion.experienceBullets : [],
     },
     selectedExperiences,
+    recentInterviewDebriefs: debriefs,
   };
 
   try {
