@@ -3,7 +3,9 @@ import "./globals.css";
 import "./resume-reference.css";
 import "./job-workspace.css";
 import "./structured-experience.css";
+import "./readiness.css";
 import { DeploymentNotice } from "@/components/DeploymentNotice";
+import { P2UiEnhancements } from "@/components/P2UiEnhancements";
 import { ProviderUiSync } from "@/components/ProviderUiSync";
 
 export const metadata: Metadata = {
@@ -23,6 +25,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body>
         {children}
+        <P2UiEnhancements />
         <DeploymentNotice />
         <ProviderUiSync />
       </body>
