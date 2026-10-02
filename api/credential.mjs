@@ -1,5 +1,6 @@
+import { createResponse, extractOutputText, getAiProvider, providerDisplayName } from "./_ai-provider.mjs";
+
 const DEFAULT_ORIGIN = "https://zoey-0314.github.io";
-const DEFAULT_MODEL = "gpt-6-luna";
 
 function allowedOrigins(req) {
   const configured = (process.env.ALLOWED_ORIGIN || DEFAULT_ORIGIN).split(",").map((item) => item.trim()).filter(Boolean);
@@ -21,16 +22,6 @@ function json(res, status, body, origin) {
   for (const [key, value] of Object.entries(corsHeaders(origin))) res.setHeader(key, value);
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
-}
-
-function extractOutputText(payload) {
-  for (const item of payload?.output || []) {
-    if (item?.type !== "message") continue;
-    for (const content of item.content || []) {
-      if (content?.type === "output_text" && typeof content.text === "string") return content.text;
-    }
-  }
-  return "";
 }
 
 function attachmentFromCredential(credential) {
@@ -59,7 +50,7 @@ const instructions = `You are CareerVault's professional credential reviewer. Yo
 Return JSON only. Never invent award level, selectivity, issuer prestige, participant count, rank, or what the candidate did.
 
 DOCUMENT EXTRACTION RULES:
-- If an image or PDF is attached, READ THAT DOCUMENT FIRST. Do not answer from the generic credential category alone.
+- If an image is attached, READ THAT DOCUMENT FIRST. Do not answer from the generic credential category alone.
 - Use visible body text, signatures, stamps/seals, logos and issuing footers as evidence.
 - Extract every directly supported field you can: credential title/name, issuer or appointing organization, date, rank/level, appointment/award description and type.
 - Do not ask the user for a field that is already legible in the uploaded document.
@@ -77,7 +68,7 @@ FOLLOW-UP RULES:
 Score from 0 to 100 based on: recognition scope, issuer credibility, selectivity/rank, relevance, and whether the credential evidences a concrete accomplishment. The score is internal resume value, not a prediction of hiring success.
 Tier must be one of: 旗舰, 高价值, 有效, 补充, 信息不足.
 Level must be one of: international, national, provincial, city, school, organization, industry, unknown.
-Output exactly:
+Output exactly this JSON shape:
 {
   "extracted": {
     "name": string,
@@ -112,13 +103,23 @@ export default async function handler(req, res) {
   }
   if (req.method !== "POST") return json(res, 405, { error: "method_not_allowed" }, responseOrigin);
   if (requestOrigin && !origins.includes(requestOrigin)) return json(res, 403, { error: "origin_not_allowed" }, responseOrigin);
-  if (!process.env.OPENAI_API_KEY) return json(res, 503, { error: "openai_not_configured", detail: "服务端尚未配置模型密钥。" }, responseOrigin);
+
+  let ai;
+  try { ai = getAiProvider(); }
+  catch (error) { return json(res, 500, { error: "invalid_ai_provider", detail: error instanceof Error ? error.message : "AI Provider 配置无效。" }, responseOrigin); }
+  if (!ai.apiKey) return json(res, 503, { error: "ai_not_configured", detail: "Vercel 尚未配置可用的 AI_API_KEY。" }, responseOrigin);
 
   const credential = req.body?.credential;
   if (!credential) return json(res, 400, { error: "credential_required" }, responseOrigin);
 
   const attachment = attachmentFromCredential(credential);
   if (attachment.kind === "unsupported") return json(res, 400, { error: "unsupported_file", detail: "当前只支持 JPG/PNG/WebP 等图片或 PDF。" }, responseOrigin);
+  if (attachment.kind === "image" && !ai.supportsImages) {
+    return json(res, 400, { error: "vision_not_supported", detail: `${providerDisplayName(ai.provider)} 当前模型 ${ai.model} 不支持图片输入；DeepSeek 请使用 deepseek-flash。` }, responseOrigin);
+  }
+  if (attachment.kind === "pdf" && !ai.supportsPdfInput) {
+    return json(res, 400, { error: "pdf_not_supported", detail: "DeepSeek Responses API 当前不支持 PDF 文件输入。请先把 PDF 转成图片上传，或手动填写证书信息。" }, responseOrigin);
+  }
 
   const safeCredential = {
     type: credential.type || "award",
@@ -143,38 +144,41 @@ export default async function handler(req, res) {
   const content = [{ type: "input_text", text: JSON.stringify(safeCredential) }];
   if (attachment.content) content.push(attachment.content);
 
-  const model = process.env.OPENAI_MODEL || DEFAULT_MODEL;
   try {
-    const upstream = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        reasoning: { effort: "low" },
-        instructions,
-        input: [{ role: "user", content }],
-        max_output_tokens: 1400,
-        store: false,
-      }),
+    const { upstream, payload } = await createResponse(ai, {
+      model: ai.model,
+      reasoning: { effort: "low" },
+      instructions,
+      input: [{ role: "user", content }],
+      text: { format: { type: "json_object" } },
+      max_output_tokens: 1400,
+      store: false,
     });
-    const payload = await upstream.json();
-    if (!upstream.ok) return json(res, upstream.status, { error: "model_error", detail: payload?.error?.message || "Request failed" }, responseOrigin);
+
+    if (!upstream.ok) return json(res, upstream.status, {
+      error: "model_error",
+      provider: ai.provider,
+      detail: payload?.error?.message || `${providerDisplayName(ai.provider)} request failed`,
+      model: ai.model,
+    }, responseOrigin);
+
     const text = extractOutputText(payload);
     let parsed;
-    try { parsed = JSON.parse(text); } catch { return json(res, 502, { error: "invalid_model_json", detail: "模型没有返回可解析的证书识别结果。" }, responseOrigin); }
+    try { parsed = JSON.parse(text); }
+    catch { return json(res, 502, { error: "invalid_model_json", provider: ai.provider, detail: "模型没有返回可解析的证书识别结果。", model: ai.model }, responseOrigin); }
 
     if (followUpAnswer && parsed?.assessment?.followUpQuestion && parsed.assessment.followUpQuestion.trim() === previousQuestion.trim()) parsed.assessment.followUpQuestion = null;
     if (safeCredential.issuer && !parsed?.extracted?.issuer) parsed.extracted.issuer = safeCredential.issuer;
     if (safeCredential.description && !parsed?.extracted?.description) parsed.extracted.description = safeCredential.description;
 
     return json(res, 200, {
-      provider: "openai",
-      model,
+      provider: ai.provider,
+      model: ai.model,
       visionUsed: attachment.kind === "image" || attachment.kind === "pdf",
       inputKind: attachment.kind,
       ...parsed,
     }, responseOrigin);
   } catch (error) {
-    return json(res, 502, { error: "upstream_unavailable", detail: error instanceof Error ? error.message : "证书识别服务暂时不可用。" }, responseOrigin);
+    return json(res, 502, { error: "upstream_unavailable", provider: ai.provider, detail: error instanceof Error ? error.message : "证书识别服务暂时不可用。", model: ai.model }, responseOrigin);
   }
 }
