@@ -1,0 +1,8 @@
+.structuredExperienceDetails { display: grid; gap: 16px; }
+.structuredFactSection { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line-soft); border-radius: 12px; background: rgba(255,255,255,.42); }
+.structuredFactHeading { display: grid; gap: 4px; }
+.structuredFactHeading strong { font-size: 12px; }
+.structuredFactHeading span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.internalOnlySection { background: #f4f1ea; }
+.legacyFacts { border-top: 1px dashed var(--line); padding-top: 12px; }
+.legacyFacts summary { color: var(--muted-2); }
