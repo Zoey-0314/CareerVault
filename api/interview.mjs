@@ -44,9 +44,27 @@ function compactExperience(experience) {
     actions: experience?.actions || "",
     tools: experience?.tools || "",
     outcomes: experience?.outcomes || "",
-    verifiedFacts: Array.isArray(experience?.verifiedFacts) ? experience.verifiedFacts.slice(-30) : [],
+    evidence: {
+      scale: Array.isArray(experience?.evidence?.scale) ? experience.evidence.scale.slice(-12) : [],
+      ownership: Array.isArray(experience?.evidence?.ownership) ? experience.evidence.ownership.slice(-12) : [],
+      difficulties: Array.isArray(experience?.evidence?.difficulties) ? experience.evidence.difficulties.slice(-12) : [],
+      artifacts: Array.isArray(experience?.evidence?.artifacts) ? experience.evidence.artifacts.slice(-12) : [],
+    },
+    aiContext: {
+      assisted: typeof experience?.aiContext?.assisted === "boolean" ? experience.aiContext.assisted : null,
+      aiContribution: Array.isArray(experience?.aiContext?.aiContribution) ? experience.aiContext.aiContribution.slice(-12) : [],
+      userContribution: Array.isArray(experience?.aiContext?.userContribution) ? experience.aiContext.userContribution.slice(-12) : [],
+    },
+    interviewPrep: {
+      questions: Array.isArray(experience?.interviewPrep?.questions) ? experience.interviewPrep.questions.slice(-12) : [],
+      weakPoints: Array.isArray(experience?.interviewPrep?.weakPoints) ? experience.interviewPrep.weakPoints.slice(-12) : [],
+      topicsToReview: Array.isArray(experience?.interviewPrep?.topicsToReview) ? experience.interviewPrep.topicsToReview.slice(-12) : [],
+    },
+    legacyVerifiedFacts: Array.isArray(experience?.verifiedFacts) ? experience.verifiedFacts.slice(-30) : [],
   };
 }
+
+const FACT_TARGETS = ["actions", "tools", "outcomes", "scale", "ownership", "difficulty", "evidence", "aiContribution", "userContribution", "interviewPrep"];
 
 const instructions = `You are CareerVault's professional resume interview agent. You behave like an experienced recruiter/resume consultant, not a generic chatbot.
 
@@ -61,27 +79,36 @@ FACT SAFETY
 - Never invent metrics, ownership, tools, dates, outcomes, awards, difficulty, or skill level.
 - If a claim is approximate, ambiguous, inferred, or materially stronger than the user's wording, mark needs_confirmation.
 - Allowed goals: specificity, tool, scale, result, ownership, difficulty, evidence.
-- Allowed targets: actions, tools, outcomes, verifiedFacts.
-- For verifiedFacts, use these prefixes when relevant: 规模：, 个人贡献：, AI参与：, 难点：, 证据：, 面试准备：.
+- Store facts in STRUCTURED targets. Never manufacture prefix strings such as “个人贡献：...” or “AI参与：...”.
+- Target mapping:
+  actions = concrete actions the user performed
+  tools = tools/technology/methods explicitly used
+  outcomes = verified deliverables/results
+  scale = natural scale/quantity/scope facts
+  ownership = responsibility/ownership facts
+  difficulty = difficulty + handling facts
+  evidence = traceable proof/artifacts
+  aiContribution = what AI generated or assisted with
+  userContribution = what the user personally decided/reviewed/modified/debugged/integrated/tested/validated
+  interviewPrep = a question/topic the candidate should prepare for interview; this is NOT a resume claim and must not contain an invented answer
 - If the user says they do not know / do not remember / did not track something, do not ask the same topic again.
 
 AI-ASSISTED PROJECT RULES
 - AI use is NOT automatically a resume bullet and should not be treated as a negative signal.
-- When the user states that AI generated substantial code, save the truthful boundary as AI参与：... .
-- Also create one or more 面试准备：... verifiedFacts describing concrete topics the user should be ready to explain in a real interview. These are preparation prompts, NOT invented answers or claims.
-- Interview-prep prompts must be grounded in modules already present in the experience: architecture decisions, why a safety mechanism exists, debugging decisions, tests, integration, failure cases, or how the user verified AI-generated code.
-- Never fabricate what the user would answer. If understanding is unknown, phrase it as something to prepare.
-- Resume wording should focus on what the user actually reviewed, modified, debugged, integrated, tested, validated, designed or decided.
+- When the user states that AI generated substantial work, save the truthful boundary using target=aiContribution.
+- When the user explains what they personally reviewed, changed, debugged, integrated, tested, validated, designed or decided, save it using target=userContribution and/or ownership.
+- Generate interviewPrep only when there is a concrete known module or risk worth preparing. It must be phrased as a preparation question/topic, never as a fabricated answer.
+- Resume wording should focus only on work the user can truthfully defend.
 
 QUESTION SELECTION RULES
 - Questions MUST be generated from existing information, not from a fixed questionnaire.
 - Prefer a concrete missing fact that materially improves resume quality or interview defensibility.
-- Do not ask for scale if a meaningful scale is already known.
-- Do not ask for tools if tools are already well evidenced.
+- Do not ask for scale if evidence.scale already contains meaningful scope.
+- Do not ask for ownership if evidence.ownership or aiContext.userContribution already makes the user's role clear.
 - Do not ask for difficulty merely to fill a checklist.
-- Do not ask for evidence if there is already obvious evidence or another missing fact is more valuable.
+- Do not ask for evidence if evidence.artifacts already contains traceable proof or another missing fact is more valuable.
 - If AI involvement is unknown and the project plausibly used AI coding, you MAY ask what AI generated and what the user personally decided, verified, debugged, integrated or tested.
-- Once AI involvement is known, do not ask the same ownership question again. If useful, ask a technical understanding question about a specific known module.
+- Once AI involvement is known, do not ask the same ownership question again. If useful, ask one narrow technical-understanding question about a known module.
 - For a mature experience with enough concrete actions, tools, outcomes and ownership, stop instead of chasing 100%.
 
 PREVIOUS QUESTIONS
@@ -111,7 +138,7 @@ const responseSchema = {
         properties: {
           id: { type: "string" },
           goal: { type: "string", enum: ["specificity", "tool", "scale", "result", "ownership", "difficulty", "evidence"] },
-          target: { type: "string", enum: ["actions", "tools", "outcomes", "verifiedFacts"] },
+          target: { type: "string", enum: FACT_TARGETS },
           value: { type: "string" },
           status: { type: "string", enum: ["confirmed", "needs_confirmation"] },
           confidence: { type: "number" },
@@ -151,11 +178,11 @@ function normalizeFact(fact, index) {
   const value = typeof fact.value === "string" ? fact.value.trim() : "";
   if (!value) return null;
   const goals = new Set(["specificity", "tool", "scale", "result", "ownership", "difficulty", "evidence"]);
-  const targets = new Set(["actions", "tools", "outcomes", "verifiedFacts"]);
+  const targets = new Set(FACT_TARGETS);
   return {
     id: typeof fact.id === "string" && fact.id.trim() ? fact.id.trim() : `fact-${Date.now()}-${index}`,
     goal: goals.has(fact.goal) ? fact.goal : "specificity",
-    target: targets.has(fact.target) ? fact.target : "verifiedFacts",
+    target: targets.has(fact.target) ? fact.target : "actions",
     value,
     status: fact.status === "needs_confirmation" ? "needs_confirmation" : "confirmed",
     confidence: Number.isFinite(Number(fact.confidence)) ? Math.max(0, Math.min(1, Number(fact.confidence))) : 0.8,
@@ -166,9 +193,7 @@ function normalizeFact(fact, index) {
 
 function normalizeAnalysis(value) {
   if (!value || typeof value !== "object") return null;
-  const facts = Array.isArray(value.extractedFacts)
-    ? value.extractedFacts.map(normalizeFact).filter(Boolean)
-    : [];
+  const facts = Array.isArray(value.extractedFacts) ? value.extractedFacts.map(normalizeFact).filter(Boolean) : [];
   const warnings = Array.isArray(value.warnings) ? value.warnings.filter((item) => typeof item === "string") : [];
   let nextQuestion = value.nextQuestion && typeof value.nextQuestion === "object" ? value.nextQuestion : null;
   if (nextQuestion) {
