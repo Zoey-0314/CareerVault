@@ -73,6 +73,49 @@ function normalizeRemotePayload<T extends { provider?: string; model?: string }>
   return { ...payload, provider: "openai", upstreamProvider } as T & { provider: "openai"; upstreamProvider: RemoteProvider };
 }
 
+function chineseDigit(char: string): number | null {
+  const digits: Record<string, number> = { "〇": 0, "○": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9 };
+  return char in digits ? digits[char] : null;
+}
+
+function parseChineseMonth(value: string): number | null {
+  const text = value.trim();
+  if (text === "十") return 10;
+  if (text === "十一") return 11;
+  if (text === "十二") return 12;
+  if (text.length === 1) return chineseDigit(text);
+  return null;
+}
+
+function parseChineseYear(value: string): number | null {
+  const digits = [...value].map(chineseDigit);
+  if (digits.length !== 4 || digits.some((digit) => digit === null)) return null;
+  return Number(digits.join(""));
+}
+
+function normalizeCredentialMonth(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return "";
+
+  const alreadyIso = raw.match(/^(20\d{2})-(0[1-9]|1[0-2])$/);
+  if (alreadyIso) return raw;
+
+  const arabic = raw.match(/(20\d{2})\s*(?:年|[-/.])\s*(\d{1,2})(?:\s*(?:月|[-/.]\d{1,2}(?:日)?))?/);
+  if (arabic) {
+    const month = Number(arabic[2]);
+    if (month >= 1 && month <= 12) return `${arabic[1]}-${String(month).padStart(2, "0")}`;
+  }
+
+  const chinese = raw.match(/([二〇○零一二三四五六七八九]{4})年\s*([一二三四五六七八九十]{1,2})月/);
+  if (chinese) {
+    const year = parseChineseYear(chinese[1]);
+    const month = parseChineseMonth(chinese[2]);
+    if (year && month && month >= 1 && month <= 12) return `${year}-${String(month).padStart(2, "0")}`;
+  }
+
+  return raw;
+}
+
 export function isRemoteAiConfigured(): boolean {
   return Boolean(configuredProxyUrl());
 }
@@ -125,6 +168,7 @@ export async function analyzeCredentialWithProvider(credential: Credential): Pro
     const raw = (await response.json()) as Omit<AiCredentialResponse, "provider"> & { provider?: string };
     if (!raw?.assessment || typeof raw.assessment.score !== "number") throw new Error("识别服务返回了无效结果。");
     if (hasAttachment && !raw.visionUsed) throw new Error("服务端没有确认读取到你上传的图片/PDF，本次结果已丢弃。");
+    if (raw.extracted?.date) raw.extracted.date = normalizeCredentialMonth(raw.extracted.date);
     return normalizeRemotePayload(raw) as AiCredentialResponse;
   } catch (error) {
     if (hasAttachment) throw error instanceof Error ? error : new Error("奖项/证书文件识别失败。");
