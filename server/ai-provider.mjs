@@ -4,6 +4,8 @@ const PROVIDER_DEFAULTS = {
 };
 
 const RATE_STATE_KEY = Symbol.for("careervault.ai-rate-state");
+const RESPONSE_CACHE_KEY = Symbol.for("careervault.ai-response-cache");
+const INFLIGHT_KEY = Symbol.for("careervault.ai-inflight");
 
 function positiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value || ""), 10);
@@ -16,12 +18,23 @@ export function getAiSafetyLimits() {
     hourLimit: positiveInt(process.env.AI_MAX_UPSTREAM_CALLS_PER_HOUR, 300),
     maxOutputTokens: positiveInt(process.env.AI_MAX_OUTPUT_TOKENS, 2200),
     maxPayloadBytes: positiveInt(process.env.AI_MAX_UPSTREAM_PAYLOAD_BYTES, 4_800_000),
+    dedupeTtlMs: positiveInt(process.env.AI_DEDUPE_TTL_MS, 20_000),
   };
 }
 
 function getRateState() {
   if (!globalThis[RATE_STATE_KEY]) globalThis[RATE_STATE_KEY] = { timestamps: [] };
   return globalThis[RATE_STATE_KEY];
+}
+
+function getResponseCache() {
+  if (!globalThis[RESPONSE_CACHE_KEY]) globalThis[RESPONSE_CACHE_KEY] = new Map();
+  return globalThis[RESPONSE_CACHE_KEY];
+}
+
+function getInflightMap() {
+  if (!globalThis[INFLIGHT_KEY]) globalThis[INFLIGHT_KEY] = new Map();
+  return globalThis[INFLIGHT_KEY];
 }
 
 function consumeAiBudget() {
@@ -42,21 +55,42 @@ function consumeAiBudget() {
   return { allowed: true, minuteLimit, hourLimit };
 }
 
-function safeJsonSize(value) {
-  try { return Buffer.byteLength(JSON.stringify(value), "utf8"); }
-  catch { return Number.POSITIVE_INFINITY; }
+function safeJson(value) {
+  try { return JSON.stringify(value); }
+  catch { return ""; }
 }
 
-function localErrorResponse(status, code, message, extraHeaders = {}) {
-  const payload = { error: { code, message } };
-  const upstream = new Response(JSON.stringify(payload), {
-    status,
+function safeJsonSize(value) {
+  const json = safeJson(value);
+  return json ? Buffer.byteLength(json, "utf8") : Number.POSITIVE_INFINITY;
+}
+
+function fastHash(text) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function requestKey(config, body) {
+  return `${config.provider}:${config.model}:${fastHash(safeJson(body))}`;
+}
+
+function responseFromSnapshot(snapshot, extraHeaders = {}) {
+  const upstream = new Response(JSON.stringify(snapshot.payload), {
+    status: snapshot.status,
     headers: {
       "Content-Type": "application/json",
       ...extraHeaders,
     },
   });
-  return { upstream, payload };
+  return { upstream, payload: snapshot.payload };
+}
+
+function localErrorResponse(status, code, message, extraHeaders = {}) {
+  return responseFromSnapshot({ status, payload: { error: { code, message } } }, extraHeaders);
 }
 
 export function getAiProvider() {
@@ -109,6 +143,21 @@ export async function createResponse(config, body) {
     );
   }
 
+  const key = requestKey(config, preparedBody);
+  const now = Date.now();
+  const cache = getResponseCache();
+  const cached = cache.get(key);
+  if (cached && now - cached.cachedAt < limits.dedupeTtlMs) {
+    return responseFromSnapshot(cached, { "X-CareerVault-Deduplicated": "cache" });
+  }
+  if (cached) cache.delete(key);
+
+  const inflight = getInflightMap();
+  if (inflight.has(key)) {
+    const snapshot = await inflight.get(key);
+    return responseFromSnapshot(snapshot, { "X-CareerVault-Deduplicated": "inflight" });
+  }
+
   const budget = consumeAiBudget();
   if (!budget.allowed) {
     return localErrorResponse(
@@ -119,13 +168,25 @@ export async function createResponse(config, body) {
     );
   }
 
-  const upstream = await fetch(config.responsesUrl, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify(preparedBody),
-  });
-  const payload = await upstream.json().catch(() => ({}));
-  return { upstream, payload };
+  const promise = (async () => {
+    const upstream = await fetch(config.responsesUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(preparedBody),
+    });
+    const payload = await upstream.json().catch(() => ({}));
+    const snapshot = { status: upstream.status, payload, cachedAt: Date.now() };
+    if (upstream.ok) cache.set(key, snapshot);
+    return snapshot;
+  })();
+
+  inflight.set(key, promise);
+  try {
+    const snapshot = await promise;
+    return responseFromSnapshot(snapshot);
+  } finally {
+    inflight.delete(key);
+  }
 }
 
 export function providerDisplayName(provider) {
