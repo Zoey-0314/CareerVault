@@ -22,14 +22,18 @@ jobs:
       NEXT_PUBLIC_CAREERVAULT_AI_URL: ${{ vars.CAREERVAULT_AI_URL }}
       NEXT_PUBLIC_SUPABASE_URL: ${{ vars.CAREERVAULT_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.CAREERVAULT_SUPABASE_PUBLISHABLE_KEY }}
+      NEXT_PUBLIC_BUILD_SHA: ${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -37,13 +41,21 @@ jobs:
           enablement: true
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Clean previous static output
+        run: rm -rf .next out
+
       - name: Build static site
         run: npm run build
+
+      - name: Stamp deployed version
+        run: |
+          touch out/.nojekyll
+          printf '{"commit":"%s","builtAt":"%s"}\n' "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > out/version.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
