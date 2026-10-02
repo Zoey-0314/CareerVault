@@ -15,6 +15,10 @@ function clauses(text: string): string[] {
     .filter((item) => item.length >= 6);
 }
 
+function isInternalInterviewFact(text: string): boolean {
+  return /^\s*(AI参与|面试准备)\s*[：:]/.test(text);
+}
+
 function unique(items: string[]): string[] {
   const result: string[] = [];
   for (const item of items) {
@@ -41,19 +45,20 @@ export interface ProfessionalBullet {
 
 export function buildTargetedResumeBullets(experience: Experience, matchedKeywords: string[]): string[] {
   const keywordSet = matchedKeywords.map((item) => item.toLowerCase()).filter(Boolean);
+  const resumeFacts = experience.verifiedFacts.filter((fact) => !isInternalInterviewFact(fact));
   const candidates = unique([
     ...clauses(experience.actions),
     ...clauses(experience.outcomes),
-    ...experience.verifiedFacts.flatMap(clauses),
+    ...resumeFacts.flatMap(clauses),
     ...clauses(experience.rawDescription),
-  ]);
+  ]).filter((item) => !isInternalInterviewFact(item));
 
   const ranked = candidates
     .map((text, index) => {
       const lower = text.toLowerCase();
       const keywordHits = keywordSet.filter((keyword) => lower.includes(keyword)).length;
       const hasResultSignal = /完成|交付|上线|修复|降低|提升|通过|负责|设计|开发|分析|检查|策划|协调|生成|部署|验证|实现|优化/.test(text);
-      const hasEvidence = /\d/.test(text) || experience.verifiedFacts.some((fact) => fact.includes(text) || text.includes(fact));
+      const hasEvidence = /\d/.test(text) || resumeFacts.some((fact) => fact.includes(text) || text.includes(fact));
       return { text, score: keywordHits * 6 + (hasResultSignal ? 2 : 0) + (hasEvidence ? 2 : 0) - index * 0.05 };
     })
     .sort((a, b) => b.score - a.score);
@@ -64,7 +69,7 @@ export function buildTargetedResumeBullets(experience: Experience, matchedKeywor
 
   if (!bullets.length) {
     const fallback = trimBullet(cleanLowSignal(experience.actions || experience.outcomes || experience.rawDescription));
-    return fallback ? [fallback] : [];
+    return fallback && !isInternalInterviewFact(fallback) ? [fallback] : [];
   }
   return bullets;
 }
@@ -75,7 +80,8 @@ export function buildProfessionalResumeBullet(experience: Experience): Professio
   const warnings: string[] = [];
   if (experience.actions) rationale.push("优先保留具体动作，而不是岗位职责堆叠");
   if (experience.outcomes) rationale.push("保留可验证结果或交付");
-  if (experience.verifiedFacts.length) rationale.push("优先使用已确认事实");
+  if (experience.verifiedFacts.some((fact) => !isInternalInterviewFact(fact))) rationale.push("优先使用已确认事实");
+  if (experience.verifiedFacts.some((fact) => /^\s*AI参与\s*[：:]/.test(fact))) warnings.push("AI 参与信息仅用于真实性边界与面试准备，不会自动写入简历正文");
   if (!experience.outcomes) warnings.push("缺少结果/交付，建议继续追问后再投递");
   return { text: text || "这段经历信息不足，建议先补充具体动作和结果。", rationale, reasons: rationale, warnings };
 }
