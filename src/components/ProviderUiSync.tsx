@@ -11,6 +11,17 @@ type AiStatus = {
   supportsPdfInput?: boolean;
 };
 
+type AiActivity = {
+  operation?: "interview" | "credential" | "jd";
+  stage?: "start" | "success" | "error" | "local";
+  provider?: "openai" | "deepseek" | "local-v1";
+  model?: string;
+  message?: string;
+  visionUsed?: boolean;
+  fallbackUsed?: boolean;
+  inputKind?: "image" | "pdf" | "text";
+};
+
 const staticReplacements: Array<[RegExp, string]> = [
   [/GPT\s*·\s*deepseek-flash/gi, "DeepSeek · deepseek-flash"],
   [/GPT\s*·\s*deepseek/gi, "DeepSeek"],
@@ -44,9 +55,7 @@ function syncProviderText(status: AiStatus | null) {
     let next = current;
     for (const [pattern, replacement] of staticReplacements) next = next.replace(pattern, replacement);
     if (status?.configured && /^(GPT|AI)\s*·\s*(待连接|连接中)$/.test(next.trim())) next = providerLabel;
-    if (status?.configured && /^GPT\s*·\s*(图片已读取|PDF 已读取)$/.test(next.trim())) {
-      next = next.replace(/^GPT/, status.providerName || "AI");
-    }
+    if (status?.configured && /^GPT\s*·\s*(图片已读取|PDF 已读取)$/.test(next.trim())) next = next.replace(/^GPT/, status.providerName || "AI");
     if (next !== current) node.nodeValue = next;
     node = walker.nextNode();
   }
@@ -112,9 +121,20 @@ function fileInputGuard(event: Event, status: AiStatus | null) {
   }
 }
 
+function activityLabel(activity: AiActivity | null) {
+  if (!activity) return "";
+  const prefix = activity.operation === "credential" ? "证书" : activity.operation === "jd" ? "JD" : "经历";
+  if (activity.stage === "start") return `${prefix} · 处理中`;
+  if (activity.stage === "error") return `${prefix} · 调用失败`;
+  if (activity.stage === "local") return `${prefix} · 本地规则`;
+  if (activity.stage === "success") return activity.fallbackUsed ? `${prefix} · 已读取 / 需核对` : `${prefix} · 已完成`;
+  return "";
+}
+
 export function ProviderUiSync() {
   const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA || "local";
   const [status, setStatus] = useState<AiStatus | null>(null);
+  const [activity, setActivity] = useState<AiActivity | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,25 +146,37 @@ export function ProviderUiSync() {
   }, []);
 
   useEffect(() => {
+    const onAiStatus = (event: Event) => {
+      const detail = (event as CustomEvent<AiActivity>).detail;
+      setActivity(detail || null);
+    };
+    window.addEventListener("careervault:ai-status", onAiStatus as EventListener);
+    return () => window.removeEventListener("careervault:ai-status", onAiStatus as EventListener);
+  }, []);
+
+  useEffect(() => {
     syncProviderText(status);
     const observer = new MutationObserver(() => syncProviderText(status));
+    const onFileChange = (event: Event) => fileInputGuard(event, status);
     observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     document.addEventListener("click", destructiveActionGuard, true);
-    document.addEventListener("change", (event) => fileInputGuard(event, status), true);
+    document.addEventListener("change", onFileChange, true);
     return () => {
       observer.disconnect();
       document.removeEventListener("click", destructiveActionGuard, true);
+      document.removeEventListener("change", onFileChange, true);
     };
   }, [status]);
 
   const provider = status?.configured
     ? `${status.providerName || "AI"}${status.model ? ` · ${status.model}` : ""}`
     : status ? "AI 未配置" : "AI 状态检查中";
+  const live = activityLabel(activity);
 
   return (
     <div
-      aria-label={`CareerVault build ${buildSha}; ${provider}`}
-      title={provider}
+      aria-label={`CareerVault build ${buildSha}; ${provider}${live ? `; ${live}` : ""}`}
+      title={activity?.message || provider}
       style={{
         position: "fixed",
         left: 12,
@@ -157,7 +189,7 @@ export function ProviderUiSync() {
         borderRadius: 999,
         background: "rgba(250,249,246,.9)",
         backdropFilter: "blur(10px)",
-        color: "#687069",
+        color: activity?.stage === "error" ? "#8a4b2a" : "#687069",
         fontSize: 10,
         lineHeight: 1,
         letterSpacing: ".02em",
@@ -166,6 +198,7 @@ export function ProviderUiSync() {
       <span>Build {buildSha === "local" ? "local" : buildSha.slice(0, 7)}</span>
       <span>·</span>
       <span>{provider}</span>
+      {live && <><span>·</span><span>{live}</span></>}
     </div>
   );
 }
