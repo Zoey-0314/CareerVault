@@ -1,5 +1,6 @@
+import { createResponse, extractOutputText, getAiProvider, providerDisplayName } from "./_ai-provider.mjs";
+
 const DEFAULT_ORIGIN = "https://zoey-0314.github.io";
-const DEFAULT_MODEL = "gpt-6-luna";
 
 function allowedOrigins(req) {
   const configured = (process.env.ALLOWED_ORIGIN || DEFAULT_ORIGIN).split(",").map((item) => item.trim()).filter(Boolean);
@@ -21,16 +22,6 @@ function json(res, status, body, origin) {
   for (const [key, value] of Object.entries(corsHeaders(origin))) res.setHeader(key, value);
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
-}
-
-function extractOutputText(payload) {
-  for (const item of payload?.output || []) {
-    if (item?.type !== "message") continue;
-    for (const content of item.content || []) {
-      if (content?.type === "output_text" && typeof content.text === "string") return content.text;
-    }
-  }
-  return "";
 }
 
 function compactExperience(experience) {
@@ -154,7 +145,11 @@ export default async function handler(req, res) {
   }
   if (req.method !== "POST") return json(res, 405, { error: "method_not_allowed" }, responseOrigin);
   if (requestOrigin && !origins.includes(requestOrigin)) return json(res, 403, { error: "origin_not_allowed", detail: `Origin ${requestOrigin} is not allowed.` }, responseOrigin);
-  if (!process.env.OPENAI_API_KEY) return json(res, 503, { error: "openai_not_configured", detail: "Vercel 未配置 OPENAI_API_KEY。" }, responseOrigin);
+
+  let ai;
+  try { ai = getAiProvider(); }
+  catch (error) { return json(res, 500, { error: "invalid_ai_provider", detail: error instanceof Error ? error.message : "AI Provider 配置无效。" }, responseOrigin); }
+  if (!ai.apiKey) return json(res, 503, { error: "ai_not_configured", detail: `Vercel 未配置 ${ai.provider === "deepseek" ? "AI_API_KEY（DeepSeek）" : "AI_API_KEY / OPENAI_API_KEY"}。` }, responseOrigin);
 
   const answer = typeof req.body?.answer === "string" ? req.body.answer.trim() : "";
   const experience = req.body?.experience;
@@ -165,47 +160,38 @@ export default async function handler(req, res) {
     return json(res, 400, { error: "experience_content_required", detail: "请先写一句经历描述，再让 AI 开始追问。" }, responseOrigin);
   }
 
-  const model = process.env.OPENAI_MODEL || DEFAULT_MODEL;
-  const input = JSON.stringify({
-    experience: compactExperience(experience),
-    previousQuestion,
-    latestAnswer: answer,
-    askedQuestions,
-  });
+  const input = JSON.stringify({ experience: compactExperience(experience), previousQuestion, latestAnswer: answer, askedQuestions });
 
   try {
-    const upstream = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        reasoning: { effort: "low" },
-        instructions,
-        input,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "career_interview_turn",
-            strict: true,
-            schema: responseSchema,
-          },
+    const { upstream, payload } = await createResponse(ai, {
+      model: ai.model,
+      reasoning: { effort: "high" },
+      instructions,
+      input,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "career_interview_turn",
+          schema: responseSchema,
         },
-        max_output_tokens: 1600,
-        store: false,
-      }),
+      },
+      max_output_tokens: 1600,
+      store: false,
     });
-    const payload = await upstream.json();
+
     if (!upstream.ok) {
       return json(res, upstream.status, {
-        error: "openai_error",
-        detail: payload?.error?.message || "OpenAI request failed",
-        model,
+        error: "model_error",
+        provider: ai.provider,
+        detail: payload?.error?.message || `${providerDisplayName(ai.provider)} request failed`,
+        model: ai.model,
       }, responseOrigin);
     }
+
     const text = extractOutputText(payload);
     let analysis;
     try { analysis = JSON.parse(text); }
-    catch { return json(res, 502, { error: "invalid_model_json", detail: "模型返回内容无法解析。", model }, responseOrigin); }
+    catch { return json(res, 502, { error: "invalid_model_json", provider: ai.provider, detail: "模型返回内容无法解析。", model: ai.model }, responseOrigin); }
 
     const answeredText = answer.trim();
     const previousText = previousQuestion?.question?.trim() || "";
@@ -218,12 +204,13 @@ export default async function handler(req, res) {
       }
     }
 
-    return json(res, 200, { provider: "openai", model, analysis }, responseOrigin);
+    return json(res, 200, { provider: ai.provider, model: ai.model, analysis }, responseOrigin);
   } catch (error) {
     return json(res, 502, {
       error: "upstream_unavailable",
-      detail: error instanceof Error ? error.message : "OpenAI 服务暂时不可用。",
-      model,
+      provider: ai.provider,
+      detail: error instanceof Error ? error.message : `${providerDisplayName(ai.provider)} 服务暂时不可用。`,
+      model: ai.model,
     }, responseOrigin);
   }
 }
