@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./resume-reference.css";
+import { ProviderUiSync } from "@/components/ProviderUiSync";
 
 export const metadata: Metadata = {
   title: "CareerVault — Career Memory & Resume Tailoring",
@@ -17,7 +18,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <meta httpEquiv="Expires" content="0" />
         <meta name="careervault-build" content={buildSha} />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <ProviderUiSync />
+      </body>
     </html>
   );
 }
