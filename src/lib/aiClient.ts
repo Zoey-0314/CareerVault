@@ -3,6 +3,8 @@ import { assessCredentialLocally } from "@/lib/credentials";
 import { getNextInterviewQuestion, type InterviewQuestion } from "@/lib/interview";
 import type { Credential, CredentialAssessment, Experience } from "@/lib/types";
 
+export type RemoteProvider = "openai" | "deepseek";
+
 export type AiInterviewAnalysis = InterviewAgentAnalysis & {
   nextQuestion?: InterviewQuestion | null;
   complete?: boolean;
@@ -10,12 +12,14 @@ export type AiInterviewAnalysis = InterviewAgentAnalysis & {
 
 export interface AiInterviewResponse {
   provider: "local-v1" | "openai";
+  upstreamProvider?: RemoteProvider;
   model?: string;
   analysis: AiInterviewAnalysis;
 }
 
 export interface AiCredentialResponse {
   provider: "local-v1" | "openai";
+  upstreamProvider?: RemoteProvider;
   model?: string;
   assessment: CredentialAssessment;
   extracted?: Partial<Pick<Credential, "name" | "issuer" | "date" | "rank" | "description" | "type">>;
@@ -25,6 +29,7 @@ export interface AiCredentialResponse {
 
 export interface AiJdResponse {
   provider: "openai";
+  upstreamProvider?: RemoteProvider;
   model?: string;
   jdText: string;
   roleTitle?: string;
@@ -57,9 +62,15 @@ function endpointFor(kind: "interview" | "credential" | "jd"): string | undefine
 }
 
 async function readError(response: Response, fallback: string): Promise<Error> {
-  const payload = await response.json().catch(() => null) as { detail?: string; error?: string; model?: string } | null;
-  const model = payload?.model ? ` [${payload.model}]` : "";
-  return new Error(`${payload?.detail || payload?.error || `${fallback}（${response.status}）`}${model}`);
+  const payload = await response.json().catch(() => null) as { detail?: string; error?: string; model?: string; provider?: string } | null;
+  const provider = payload?.provider ? `${payload.provider}` : "AI";
+  const model = payload?.model ? ` · ${payload.model}` : "";
+  return new Error(`${payload?.detail || payload?.error || `${fallback}（${response.status}）`} [${provider}${model}]`);
+}
+
+function normalizeRemotePayload<T extends { provider?: string; model?: string }>(payload: T): T & { provider: "openai"; upstreamProvider: RemoteProvider } {
+  const upstreamProvider: RemoteProvider = payload.provider === "deepseek" ? "deepseek" : "openai";
+  return { ...payload, provider: "openai", upstreamProvider } as T & { provider: "openai"; upstreamProvider: RemoteProvider };
 }
 
 export function isRemoteAiConfigured(): boolean {
@@ -95,11 +106,9 @@ export async function analyzeInterviewWithProvider(
     }),
   });
   if (!response.ok) throw await readError(response, "AI 面试调用失败");
-  const payload = (await response.json()) as AiInterviewResponse;
-  if (!payload?.analysis?.extractedFacts || !("nextQuestion" in payload.analysis)) {
-    throw new Error("AI 面试服务返回了无效结构。");
-  }
-  return payload;
+  const raw = (await response.json()) as Omit<AiInterviewResponse, "provider"> & { provider?: string };
+  if (!raw?.analysis?.extractedFacts || !("nextQuestion" in raw.analysis)) throw new Error("AI 面试服务返回了无效结构。");
+  return normalizeRemotePayload(raw) as AiInterviewResponse;
 }
 
 export async function analyzeCredentialWithProvider(credential: Credential): Promise<AiCredentialResponse> {
@@ -113,10 +122,10 @@ export async function analyzeCredentialWithProvider(credential: Credential): Pro
   try {
     const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential }) });
     if (!response.ok) throw await readError(response, "奖项/证书识别失败");
-    const payload = (await response.json()) as AiCredentialResponse;
-    if (!payload?.assessment || typeof payload.assessment.score !== "number") throw new Error("识别服务返回了无效结果。");
-    if (hasAttachment && !payload.visionUsed) throw new Error("服务端没有确认读取到你上传的图片/PDF，本次结果已丢弃。");
-    return payload;
+    const raw = (await response.json()) as Omit<AiCredentialResponse, "provider"> & { provider?: string };
+    if (!raw?.assessment || typeof raw.assessment.score !== "number") throw new Error("识别服务返回了无效结果。");
+    if (hasAttachment && !raw.visionUsed) throw new Error("服务端没有确认读取到你上传的图片/PDF，本次结果已丢弃。");
+    return normalizeRemotePayload(raw) as AiCredentialResponse;
   } catch (error) {
     if (hasAttachment) throw error instanceof Error ? error : new Error("奖项/证书文件识别失败。");
     return { provider: "local-v1", assessment: local, visionUsed: false, inputKind: "text" };
@@ -128,10 +137,10 @@ export async function analyzeJdFileWithProvider(fileDataUrl: string, filename: s
   if (!url) throw new Error("当前部署未配置文件识别服务，请直接粘贴 JD 文本。");
   const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileDataUrl, filename }) });
   if (!response.ok) throw await readError(response, "JD 文件识别失败");
-  const payload = (await response.json()) as AiJdResponse;
-  if (!payload?.jdText?.trim()) throw new Error("文件中没有识别到可用的岗位职责或任职要求。");
-  if (!payload.visionUsed) throw new Error("服务端没有确认读取到上传文件，本次结果已丢弃。");
-  return payload;
+  const raw = (await response.json()) as Omit<AiJdResponse, "provider"> & { provider?: string };
+  if (!raw?.jdText?.trim()) throw new Error("文件中没有识别到可用的岗位职责或任职要求。");
+  if (!raw.visionUsed) throw new Error("服务端没有确认读取到上传文件，本次结果已丢弃。");
+  return normalizeRemotePayload(raw) as AiJdResponse;
 }
 
 export async function analyzeJdImageWithProvider(imageDataUrl: string): Promise<AiJdResponse> {
