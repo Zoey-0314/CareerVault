@@ -4,12 +4,17 @@ import { getNextInterviewQuestion, type InterviewQuestion } from "@/lib/intervie
 import type { Credential, CredentialAssessment, Experience } from "@/lib/types";
 
 export type RemoteProvider = "openai" | "deepseek";
+export type AiOperation = "interview" | "credential" | "jd";
 
 export type AiInterviewAnalysis = InterviewAgentAnalysis & {
   nextQuestion?: InterviewQuestion | null;
   complete?: boolean;
 };
 
+/**
+ * `provider` is kept as a compatibility alias for older UI code.
+ * `upstreamProvider` is the actual remote provider and must be used for truthful display/telemetry.
+ */
 export interface AiInterviewResponse {
   provider: "local-v1" | "openai";
   upstreamProvider?: RemoteProvider;
@@ -25,6 +30,9 @@ export interface AiCredentialResponse {
   extracted?: Partial<Pick<Credential, "name" | "issuer" | "date" | "rank" | "description" | "type">>;
   visionUsed?: boolean;
   inputKind?: "image" | "pdf" | "text";
+  transcriptionUsed?: boolean;
+  keyFieldVerificationUsed?: boolean;
+  fallbackUsed?: boolean;
 }
 
 export interface AiJdResponse {
@@ -43,6 +51,21 @@ export interface InterviewTurnContext {
 }
 
 const DEFAULT_PUBLIC_PROXY = "https://career-vault-sage.vercel.app/api/interview";
+const AI_STATUS_EVENT = "careervault:ai-status";
+
+function emitAiStatus(detail: {
+  operation: AiOperation;
+  stage: "start" | "success" | "error" | "local";
+  provider?: RemoteProvider | "local-v1";
+  model?: string;
+  message?: string;
+  visionUsed?: boolean;
+  fallbackUsed?: boolean;
+  inputKind?: "image" | "pdf" | "text";
+}) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AI_STATUS_EVENT, { detail }));
+}
 
 function configuredProxyUrl(): string | undefined {
   const configured = process.env.NEXT_PUBLIC_CAREERVAULT_AI_URL?.trim();
@@ -128,6 +151,7 @@ export async function analyzeInterviewWithProvider(
   const url = endpointFor("interview");
   if (!url) {
     const local = analyzeInterviewTurn(answer, experience);
+    emitAiStatus({ operation: "interview", stage: "local", provider: "local-v1", message: "远程 AI 未配置，使用本地规则。" });
     return {
       provider: "local-v1",
       analysis: {
@@ -138,20 +162,28 @@ export async function analyzeInterviewWithProvider(
     };
   }
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      answer,
-      experience,
-      previousQuestion: context.previousQuestion || null,
-      askedQuestions: context.askedQuestions || [],
-    }),
-  });
-  if (!response.ok) throw await readError(response, "AI 面试调用失败");
-  const raw = (await response.json()) as Omit<AiInterviewResponse, "provider"> & { provider?: string };
-  if (!raw?.analysis?.extractedFacts || !("nextQuestion" in raw.analysis)) throw new Error("AI 面试服务返回了无效结构。");
-  return normalizeRemotePayload(raw) as AiInterviewResponse;
+  emitAiStatus({ operation: "interview", stage: "start", message: answer ? "正在分析本轮回答并决定下一问" : "正在阅读已有经历并决定下一问" });
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        answer,
+        experience,
+        previousQuestion: context.previousQuestion || null,
+        askedQuestions: context.askedQuestions || [],
+      }),
+    });
+    if (!response.ok) throw await readError(response, "AI 面试调用失败");
+    const raw = (await response.json()) as Omit<AiInterviewResponse, "provider"> & { provider?: string };
+    if (!raw?.analysis?.extractedFacts || !("nextQuestion" in raw.analysis)) throw new Error("AI 面试服务返回了无效结构。");
+    const normalized = normalizeRemotePayload(raw) as AiInterviewResponse;
+    emitAiStatus({ operation: "interview", stage: "success", provider: normalized.upstreamProvider, model: normalized.model, message: "已分析回答并生成下一步" });
+    return normalized;
+  } catch (error) {
+    emitAiStatus({ operation: "interview", stage: "error", message: error instanceof Error ? error.message : "AI 面试调用失败" });
+    throw error;
+  }
 }
 
 export async function analyzeCredentialWithProvider(credential: Credential): Promise<AiCredentialResponse> {
@@ -160,8 +192,10 @@ export async function analyzeCredentialWithProvider(credential: Credential): Pro
   const hasAttachment = Boolean(credential.attachmentDataUrl || credential.imageDataUrl);
   if (!url) {
     if (hasAttachment) throw new Error("当前部署未配置图片/PDF识别服务，上传文件尚未被读取。请稍后重试或手动填写。");
+    emitAiStatus({ operation: "credential", stage: "local", provider: "local-v1", message: "仅使用本地文本规则判断" });
     return { provider: "local-v1", assessment: local, visionUsed: false, inputKind: "text" };
   }
+  emitAiStatus({ operation: "credential", stage: "start", message: hasAttachment ? "正在读取证书文件并核对关键字段" : "正在判断证书信息" });
   try {
     const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential }) });
     if (!response.ok) throw await readError(response, "奖项/证书识别失败");
@@ -169,8 +203,20 @@ export async function analyzeCredentialWithProvider(credential: Credential): Pro
     if (!raw?.assessment || typeof raw.assessment.score !== "number") throw new Error("识别服务返回了无效结果。");
     if (hasAttachment && !raw.visionUsed) throw new Error("服务端没有确认读取到你上传的图片/PDF，本次结果已丢弃。");
     if (raw.extracted?.date) raw.extracted.date = normalizeCredentialMonth(raw.extracted.date);
-    return normalizeRemotePayload(raw) as AiCredentialResponse;
+    const normalized = normalizeRemotePayload(raw) as AiCredentialResponse;
+    emitAiStatus({
+      operation: "credential",
+      stage: "success",
+      provider: normalized.upstreamProvider,
+      model: normalized.model,
+      visionUsed: normalized.visionUsed,
+      fallbackUsed: normalized.fallbackUsed,
+      inputKind: normalized.inputKind,
+      message: normalized.fallbackUsed ? "文件已读取；结构化结果使用了安全兜底，请人工核对" : "文件已读取并完成关键字段核对",
+    });
+    return normalized;
   } catch (error) {
+    emitAiStatus({ operation: "credential", stage: "error", message: error instanceof Error ? error.message : "奖项/证书文件识别失败" });
     if (hasAttachment) throw error instanceof Error ? error : new Error("奖项/证书文件识别失败。");
     return { provider: "local-v1", assessment: local, visionUsed: false, inputKind: "text" };
   }
@@ -179,12 +225,20 @@ export async function analyzeCredentialWithProvider(credential: Credential): Pro
 export async function analyzeJdFileWithProvider(fileDataUrl: string, filename: string): Promise<AiJdResponse> {
   const url = endpointFor("jd");
   if (!url) throw new Error("当前部署未配置文件识别服务，请直接粘贴 JD 文本。");
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileDataUrl, filename }) });
-  if (!response.ok) throw await readError(response, "JD 文件识别失败");
-  const raw = (await response.json()) as Omit<AiJdResponse, "provider"> & { provider?: string };
-  if (!raw?.jdText?.trim()) throw new Error("文件中没有识别到可用的岗位职责或任职要求。");
-  if (!raw.visionUsed) throw new Error("服务端没有确认读取到上传文件，本次结果已丢弃。");
-  return normalizeRemotePayload(raw) as AiJdResponse;
+  emitAiStatus({ operation: "jd", stage: "start", message: "正在读取岗位文件并提取 JD" });
+  try {
+    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileDataUrl, filename }) });
+    if (!response.ok) throw await readError(response, "JD 文件识别失败");
+    const raw = (await response.json()) as Omit<AiJdResponse, "provider"> & { provider?: string };
+    if (!raw?.jdText?.trim()) throw new Error("文件中没有识别到可用的岗位职责或任职要求。");
+    if (!raw.visionUsed) throw new Error("服务端没有确认读取到上传文件，本次结果已丢弃。");
+    const normalized = normalizeRemotePayload(raw) as AiJdResponse;
+    emitAiStatus({ operation: "jd", stage: "success", provider: normalized.upstreamProvider, model: normalized.model, visionUsed: normalized.visionUsed, inputKind: normalized.inputKind, message: "已读取岗位文件并提取 JD" });
+    return normalized;
+  } catch (error) {
+    emitAiStatus({ operation: "jd", stage: "error", message: error instanceof Error ? error.message : "JD 文件识别失败" });
+    throw error;
+  }
 }
 
 export async function analyzeJdImageWithProvider(imageDataUrl: string): Promise<AiJdResponse> {

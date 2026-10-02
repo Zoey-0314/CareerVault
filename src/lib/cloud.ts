@@ -46,7 +46,23 @@ export async function signOutCloud(): Promise<void> {
 export async function saveVaultToCloud(userId: string, state: VaultState): Promise<void> {
   const supabase = getSupabase();
   if (!supabase) throw new Error("云同步尚未配置");
-  const { error } = await supabase.from("career_vaults").upsert({ user_id: userId, payload: state, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+
+  const { data: existing, error: readError } = await supabase
+    .from("career_vaults")
+    .select("updated_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (readError) throw readError;
+
+  const remoteTime = existing?.updated_at ? Date.parse(existing.updated_at) : Number.NaN;
+  const localTime = state.updatedAt ? Date.parse(state.updatedAt) : Number.NaN;
+  if (Number.isFinite(remoteTime) && Number.isFinite(localTime) && remoteTime > localTime + 1000) {
+    throw new Error("检测到云端版本比当前浏览器更新。为避免覆盖新数据，请先导出本地备份，再从云端恢复并核对后重新同步。");
+  }
+
+  const { error } = await supabase
+    .from("career_vaults")
+    .upsert({ user_id: userId, payload: state, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
   if (error) throw error;
 }
 

@@ -3,6 +3,37 @@ const PROVIDER_DEFAULTS = {
   deepseek: { baseUrl: "https://api.deepseek.com", model: "deepseek-flash" },
 };
 
+const RATE_STATE_KEY = Symbol.for("careervault.ai-rate-state");
+
+function positiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getRateState() {
+  if (!globalThis[RATE_STATE_KEY]) globalThis[RATE_STATE_KEY] = { timestamps: [] };
+  return globalThis[RATE_STATE_KEY];
+}
+
+function consumeAiBudget() {
+  const now = Date.now();
+  const minuteLimit = positiveInt(process.env.AI_MAX_UPSTREAM_CALLS_PER_MINUTE, 120);
+  const hourLimit = positiveInt(process.env.AI_MAX_UPSTREAM_CALLS_PER_HOUR, 1200);
+  const state = getRateState();
+  state.timestamps = state.timestamps.filter((time) => now - time < 60 * 60 * 1000);
+  const lastMinute = state.timestamps.filter((time) => now - time < 60 * 1000).length;
+  if (lastMinute >= minuteLimit || state.timestamps.length >= hourLimit) {
+    return {
+      allowed: false,
+      retryAfterSeconds: lastMinute >= minuteLimit ? 60 : 300,
+      minuteLimit,
+      hourLimit,
+    };
+  }
+  state.timestamps.push(now);
+  return { allowed: true, minuteLimit, hourLimit };
+}
+
 export function getAiProvider() {
   const requested = String(process.env.AI_PROVIDER || "").trim().toLowerCase();
   const provider = requested || (process.env.AI_API_KEY ? "deepseek" : "openai");
@@ -36,6 +67,24 @@ export function extractOutputText(payload) {
 }
 
 export async function createResponse(config, body) {
+  const budget = consumeAiBudget();
+  if (!budget.allowed) {
+    const payload = {
+      error: {
+        code: "careervault_rate_limited",
+        message: "CareerVault 的公共 AI 调用暂时达到安全上限，请稍后再试。",
+      },
+    };
+    const upstream = new Response(JSON.stringify(payload), {
+      status: 429,
+      headers: {
+        "Content-Type": "application/json",
+        "Retry-After": String(budget.retryAfterSeconds),
+      },
+    });
+    return { upstream, payload };
+  }
+
   const upstream = await fetch(config.responsesUrl, {
     method: "POST",
     headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
