@@ -9,6 +9,12 @@ type AiStatus = {
   model?: string;
   supportsImages?: boolean;
   supportsPdfInput?: boolean;
+  safety?: {
+    maxUpstreamCallsPerMinute?: number;
+    maxUpstreamCallsPerHour?: number;
+    maxOutputTokens?: number;
+    maxPayloadBytes?: number;
+  };
 };
 
 type AiActivity = {
@@ -21,6 +27,15 @@ type AiActivity = {
   fallbackUsed?: boolean;
   inputKind?: "image" | "pdf" | "text";
 };
+
+type BrowserQuota = {
+  date: string;
+  used: number;
+  limit: number;
+};
+
+const BROWSER_QUOTA_KEY = "careervault-ai-browser-quota-v1";
+const DEFAULT_BROWSER_DAILY_LIMIT = 80;
 
 const staticReplacements: Array<[RegExp, string]> = [
   [/GPT\s*·\s*deepseek-flash/gi, "DeepSeek · deepseek-flash"],
@@ -131,10 +146,75 @@ function activityLabel(activity: AiActivity | null) {
   return "";
 }
 
+function todayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function readBrowserQuota(): BrowserQuota {
+  const fallback = { date: todayKey(), used: 0, limit: DEFAULT_BROWSER_DAILY_LIMIT };
+  if (typeof localStorage === "undefined") return fallback;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(BROWSER_QUOTA_KEY) || "null") as Partial<BrowserQuota> | null;
+    if (!parsed || parsed.date !== fallback.date) return fallback;
+    return {
+      date: fallback.date,
+      used: Math.max(0, Number(parsed.used) || 0),
+      limit: DEFAULT_BROWSER_DAILY_LIMIT,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function saveBrowserQuota(quota: BrowserQuota) {
+  try { localStorage.setItem(BROWSER_QUOTA_KEY, JSON.stringify(quota)); }
+  catch { /* localStorage may be unavailable in privacy mode. */ }
+}
+
+function isAiApiRequest(input: RequestInfo | URL, init?: RequestInit) {
+  const method = String(init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+  if (method !== "POST") return false;
+  const raw = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  try {
+    const url = new URL(raw, window.location.origin);
+    return /\/api\/(interview|credential|jd)$/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 export function ProviderUiSync() {
   const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA || "local";
   const [status, setStatus] = useState<AiStatus | null>(null);
   const [activity, setActivity] = useState<AiActivity | null>(null);
+  const [quota, setQuota] = useState<BrowserQuota>({ date: todayKey(), used: 0, limit: DEFAULT_BROWSER_DAILY_LIMIT });
+
+  useEffect(() => {
+    setQuota(readBrowserQuota());
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!isAiApiRequest(input, init)) return originalFetch(input, init);
+      const current = readBrowserQuota();
+      if (current.used >= current.limit) {
+        setQuota(current);
+        return new Response(JSON.stringify({
+          error: "browser_daily_ai_limit",
+          detail: `当前浏览器今天已使用 ${current.limit} 次 AI 操作。为保护公共 DeepSeek 额度，今日已暂停继续调用；明天会自动恢复。`,
+          provider: status?.provider || "AI",
+          model: status?.model || "",
+        }), {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const next = { ...current, used: current.used + 1 };
+      saveBrowserQuota(next);
+      setQuota(next);
+      return originalFetch(input, init);
+    };
+    return () => { window.fetch = originalFetch; };
+  }, [status?.provider, status?.model]);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,11 +252,12 @@ export function ProviderUiSync() {
     ? `${status.providerName || "AI"}${status.model ? ` · ${status.model}` : ""}`
     : status ? "AI 未配置" : "AI 状态检查中";
   const live = activityLabel(activity);
+  const quotaLabel = `今日 AI ${quota.used}/${quota.limit}`;
 
   return (
     <div
-      aria-label={`CareerVault build ${buildSha}; ${provider}${live ? `; ${live}` : ""}`}
-      title={activity?.message || provider}
+      aria-label={`CareerVault build ${buildSha}; ${provider}; ${quotaLabel}${live ? `; ${live}` : ""}`}
+      title={activity?.message || `${provider} · ${quotaLabel}`}
       style={{
         position: "fixed",
         left: 12,
@@ -198,6 +279,8 @@ export function ProviderUiSync() {
       <span>Build {buildSha === "local" ? "local" : buildSha.slice(0, 7)}</span>
       <span>·</span>
       <span>{provider}</span>
+      <span>·</span>
+      <span>{quotaLabel}</span>
       {live && <><span>·</span><span>{live}</span></>}
     </div>
   );

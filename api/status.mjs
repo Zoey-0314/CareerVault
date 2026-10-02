@@ -1,4 +1,4 @@
-import { getAiProvider, providerDisplayName } from "./_ai-provider.mjs";
+import { getAiProvider, getAiSafetyLimits, providerDisplayName } from "./_ai-provider.mjs";
 
 const DEFAULT_ORIGIN = "https://zoey-0314.github.io";
 
@@ -44,6 +44,7 @@ export default function handler(req, res) {
 
   try {
     const ai = getAiProvider();
+    const limits = getAiSafetyLimits();
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.end(JSON.stringify({
       configured: Boolean(ai.apiKey),
@@ -52,6 +53,12 @@ export default function handler(req, res) {
       model: ai.model,
       supportsImages: ai.supportsImages,
       supportsPdfInput: ai.supportsPdfInput,
+      safety: {
+        maxUpstreamCallsPerMinute: limits.minuteLimit,
+        maxUpstreamCallsPerHour: limits.hourLimit,
+        maxOutputTokens: limits.maxOutputTokens,
+        maxPayloadBytes: limits.maxPayloadBytes,
+      },
     }));
   } catch (error) {
     res.statusCode = 500;
