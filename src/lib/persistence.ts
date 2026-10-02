@@ -120,19 +120,26 @@ export async function fileToCompressedDataUrl(file: File): Promise<string> {
   const raw = await fileToDataUrl(file);
   if (!file.type.startsWith("image/")) return raw;
 
+  // Preserve original pixels for ordinary document photos. Small text, seals and
+  // dates are much less reliable after aggressive 1800px downscaling.
+  // 2.6 MB stays below a typical serverless request limit after base64 expansion.
+  if (file.size <= 2.6 * 1024 * 1024) return raw;
+
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = reject;
     img.src = raw;
   });
-  const max = 1800;
+  const max = 2400;
   const scale = Math.min(1, max / Math.max(image.width, image.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(image.width * scale));
   canvas.height = Math.max(1, Math.round(image.height * scale));
   const ctx = canvas.getContext("2d");
   if (!ctx) return raw;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.9);
+  return canvas.toDataURL("image/jpeg", 0.93);
 }
