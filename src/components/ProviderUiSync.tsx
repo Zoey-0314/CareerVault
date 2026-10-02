@@ -43,7 +43,10 @@ function syncProviderText(status: AiStatus | null) {
     const current = node.nodeValue || "";
     let next = current;
     for (const [pattern, replacement] of staticReplacements) next = next.replace(pattern, replacement);
-    if (status?.configured && /^(GPT|AI)\s*·\s*(待连接|连接中)$/.test(next.trim())) next = next.replace(/^(GPT|AI)\s*·\s*(待连接|连接中)$/, providerLabel);
+    if (status?.configured && /^(GPT|AI)\s*·\s*(待连接|连接中)$/.test(next.trim())) next = providerLabel;
+    if (status?.configured && /^GPT\s*·\s*(图片已读取|PDF 已读取)$/.test(next.trim())) {
+      next = next.replace(/^GPT/, status.providerName || "AI");
+    }
     if (next !== current) node.nodeValue = next;
     node = walker.nextNode();
   }
@@ -56,10 +59,18 @@ function syncProviderText(status: AiStatus | null) {
     }
     for (const element of Array.from(document.querySelectorAll<HTMLElement>("span,p,strong"))) {
       if (element.textContent?.includes("支持图片或 PDF")) element.textContent = element.textContent.replace("支持图片或 PDF", "当前 AI 仅支持图片识别；PDF 请先转成图片");
+      if (element.textContent?.includes("支持图片与 PDF")) element.textContent = element.textContent.replace("支持图片与 PDF", "当前 AI 仅支持图片；PDF 请先转成图片");
       if (element.textContent?.includes("岗位图片 / PDF")) element.textContent = element.textContent.replace("岗位图片 / PDF", "岗位图片");
       if (element.textContent?.includes("选择图片 / PDF")) element.textContent = element.textContent.replace("选择图片 / PDF", "选择图片");
+      if (element.textContent?.includes("岗位截图或 PDF")) element.textContent = element.textContent.replace("岗位截图或 PDF", "岗位截图");
     }
   }
+}
+
+function cancelEvent(event: Event) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
 }
 
 function destructiveActionGuard(event: MouseEvent) {
@@ -69,20 +80,34 @@ function destructiveActionGuard(event: MouseEvent) {
 
   if (button.querySelector(".lucide-trash-2")) {
     const ok = window.confirm("确定删除这条记录吗？删除后会立即从当前浏览器的数据中移除。建议重要数据先导出备份。");
-    if (!ok) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-    }
+    if (!ok) cancelEvent(event);
     return;
   }
 
   if (button.textContent?.includes("从云端恢复")) {
     const ok = window.confirm("从云端恢复会覆盖当前浏览器里的档案、经历、证书和 JD。确定继续吗？如果本地内容更新，建议先点“同步到云端”或导出备份。");
+    if (!ok) cancelEvent(event);
+  }
+}
+
+function fileInputGuard(event: Event, status: AiStatus | null) {
+  const input = event.target instanceof HTMLInputElement ? event.target : null;
+  if (!input || input.type !== "file" || !input.files?.length) return;
+  const file = input.files[0];
+  const accept = input.getAttribute("accept") || "";
+
+  if (file.type === "application/pdf" && status?.supportsPdfInput === false) {
+    window.alert("当前 DeepSeek 模型不支持直接读取 PDF。请先把 PDF 转成图片再上传；本次文件没有发送给 AI。");
+    input.value = "";
+    cancelEvent(event);
+    return;
+  }
+
+  if ((accept.includes("application/json") || accept.includes(".json")) && file.name.toLowerCase().endsWith(".json")) {
+    const ok = window.confirm("恢复备份会覆盖当前浏览器中的 CareerVault 数据。确定继续吗？建议先导出当前备份，以便需要时撤回。");
     if (!ok) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
+      input.value = "";
+      cancelEvent(event);
     }
   }
 }
@@ -105,6 +130,7 @@ export function ProviderUiSync() {
     const observer = new MutationObserver(() => syncProviderText(status));
     observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     document.addEventListener("click", destructiveActionGuard, true);
+    document.addEventListener("change", (event) => fileInputGuard(event, status), true);
     return () => {
       observer.disconnect();
       document.removeEventListener("click", destructiveActionGuard, true);
