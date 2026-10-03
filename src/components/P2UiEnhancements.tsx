@@ -45,6 +45,14 @@ function clickNav(label: string) {
   button?.click();
 }
 
+function setTextIfChanged(element: HTMLElement | null, value: string) {
+  if (element && element.textContent !== value) element.textContent = value;
+}
+
+function setPlaceholderIfChanged(element: HTMLInputElement | HTMLTextAreaElement | null, value: string) {
+  if (element && element.placeholder !== value) element.placeholder = value;
+}
+
 function updateCredentialCopy() {
   const root = document.getElementById("credential-editor");
   if (!root) return;
@@ -61,13 +69,13 @@ function updateCredentialCopy() {
     const input = label.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
     const text = span?.textContent || "";
     if (/颁发|主办|发证|认证机构|评选|聘任单位|出具/.test(text) && input) {
-      if (span) span.textContent = copy.issuerLabel;
+      setTextIfChanged(span, copy.issuerLabel);
     } else if (/奖级|名次|考试等级|认证.*等级|职位.*任期|荣誉称号/.test(text) && input) {
-      if (span) span.textContent = copy.rankLabel;
-      input.placeholder = copy.rankPlaceholder;
+      setTextIfChanged(span, copy.rankLabel);
+      setPlaceholderIfChanged(input, copy.rankPlaceholder);
     } else if (/为什么获得|对应了什么实际成果|证明了什么能力|参赛项目|任职.*成果/.test(text) && input) {
-      if (span) span.textContent = copy.descriptionLabel;
-      input.placeholder = copy.descriptionPlaceholder;
+      setTextIfChanged(span, copy.descriptionLabel);
+      setPlaceholderIfChanged(input, copy.descriptionPlaceholder);
     }
   }
 }
@@ -78,25 +86,39 @@ export function P2UiEnhancements() {
 
   useEffect(() => {
     let cancelled = false;
+    let lastCredentialEditor: Element | null = null;
+
     const refresh = async () => {
       const value = await readRawVaultState();
       if (!cancelled) setState(value);
     };
+
+    const syncMountedViews = () => {
+      setOverviewTarget(document.querySelector(".heroPanel")?.closest(".sectionStack") || null);
+      const credentialEditor = document.getElementById("credential-editor");
+      if (credentialEditor !== lastCredentialEditor) {
+        lastCredentialEditor = credentialEditor;
+        if (credentialEditor) updateCredentialCopy();
+      }
+    };
+
     void refresh();
     const timer = window.setInterval(refresh, 1800);
-    const observer = new MutationObserver(() => {
-      setOverviewTarget(document.querySelector(".heroPanel")?.closest(".sectionStack") || null);
-      updateCredentialCopy();
-    });
+    const observer = new MutationObserver(syncMountedViews);
     observer.observe(document.body, { subtree: true, childList: true });
-    setOverviewTarget(document.querySelector(".heroPanel")?.closest(".sectionStack") || null);
-    updateCredentialCopy();
-    document.addEventListener("change", updateCredentialCopy, true);
+    syncMountedViews();
+
+    const onChange = (event: Event) => {
+      const target = event.target as Element | null;
+      if (target?.closest("#credential-editor")) updateCredentialCopy();
+    };
+    document.addEventListener("change", onChange, true);
+
     return () => {
       cancelled = true;
       window.clearInterval(timer);
       observer.disconnect();
-      document.removeEventListener("change", updateCredentialCopy, true);
+      document.removeEventListener("change", onChange, true);
     };
   }, []);
 
@@ -116,8 +138,8 @@ export function P2UiEnhancements() {
     if (!card) return;
     const strong = card.querySelector("strong");
     const label = card.querySelector("span");
-    if (strong) strong.textContent = `${readiness.score}%`;
-    if (label) label.textContent = "求职准备度";
+    if (strong && strong.textContent !== `${readiness.score}%`) strong.textContent = `${readiness.score}%`;
+    if (label && label.textContent !== "求职准备度") label.textContent = "求职准备度";
   }, [readiness, overviewTarget]);
 
   if (!readiness || !overviewTarget) return null;
