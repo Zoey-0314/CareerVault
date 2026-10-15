@@ -24,7 +24,6 @@ type AiActivity = {
   model?: string;
   message?: string;
   visionUsed?: boolean;
-  fallbackUsed?: boolean;
   inputKind?: "image" | "pdf" | "text";
 };
 
@@ -144,7 +143,7 @@ function activityLabel(activity: AiActivity | null) {
   const prefix = activity.operation === "credential" ? "证书" : activity.operation === "jd" ? "JD" : "经历";
   if (activity.stage === "start") return `${prefix} · 处理中`;
   if (activity.stage === "error") return `${prefix} · 调用失败`;
-  if (activity.stage === "success") return activity.fallbackUsed ? `${prefix} · 已读取 / 需核对` : `${prefix} · 已完成`;
+  if (activity.stage === "success") return `${prefix} · 已完成`;
   return "";
 }
 
