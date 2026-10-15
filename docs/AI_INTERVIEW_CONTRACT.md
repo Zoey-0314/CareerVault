@@ -141,6 +141,6 @@ The interview endpoint is:
 
 Supported remote providers are selected through the server-side provider adapter. The current production deployment uses DeepSeek.
 
-If the provider is unavailable, misconfigured, rate-limited, or returns an invalid payload, the UI must show an explicit error. CareerVault must not switch to a deterministic local analyzer or synthesize a substitute interview result.
+If the provider is unavailable, misconfigured, rate-limited, or returns an invalid payload, the UI must show an explicit error. CareerVault must not synthesize a substitute interview result when the remote provider fails.
 
 The fact-storage layer remains provider-independent, but every AI-labelled interview result must come from a real remote provider response.
