@@ -14,17 +14,17 @@ export async function pdfFileToImageDataUrls(file: File, maxPages = MAX_PDF_PAGE
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const document = await pdfjs.getDocument({ data: bytes }).promise;
-  const count = Math.min(document.numPages, Math.max(1, maxPages));
+  const pdfDocument = await pdfjs.getDocument({ data: bytes }).promise;
+  const count = Math.min(pdfDocument.numPages, Math.max(1, maxPages));
   const images: string[] = [];
 
   for (let pageNumber = 1; pageNumber <= count; pageNumber += 1) {
-    const page = await document.getPage(pageNumber);
+    const page = await pdfDocument.getPage(pageNumber);
     const baseViewport = page.getViewport({ scale: 1 });
     const scale = Math.min(2, MAX_PAGE_WIDTH / Math.max(baseViewport.width, 1));
     const viewport = page.getViewport({ scale });
 
-    const canvas = document.createElement("canvas");
+    const canvas = window.document.createElement("canvas");
     canvas.width = Math.ceil(viewport.width);
     canvas.height = Math.ceil(viewport.height);
     const context = canvas.getContext("2d", { alpha: false });
