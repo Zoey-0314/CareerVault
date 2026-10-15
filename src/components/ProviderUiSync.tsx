@@ -77,16 +77,19 @@ function syncProviderText(status: AiStatus | null) {
 
   if (status?.supportsPdfInput === false) {
     for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]'))) {
+      if (input.dataset.pdfClientConvert === "true") continue;
       const accept = input.getAttribute("accept") || "";
       if (!accept.includes("application/pdf") && !accept.includes(".pdf")) continue;
       input.setAttribute("accept", "image/*");
     }
-    for (const element of Array.from(document.querySelectorAll<HTMLElement>("span,p,strong"))) {
-      if (element.textContent?.includes("支持图片或 PDF")) element.textContent = element.textContent.replace("支持图片或 PDF", "当前 AI 仅支持图片识别；PDF 请先转成图片");
-      if (element.textContent?.includes("支持图片与 PDF")) element.textContent = element.textContent.replace("支持图片与 PDF", "当前 AI 仅支持图片；PDF 请先转成图片");
-      if (element.textContent?.includes("岗位图片 / PDF")) element.textContent = element.textContent.replace("岗位图片 / PDF", "岗位图片");
-      if (element.textContent?.includes("选择图片 / PDF")) element.textContent = element.textContent.replace("选择图片 / PDF", "选择图片");
-      if (element.textContent?.includes("岗位截图或 PDF")) element.textContent = element.textContent.replace("岗位截图或 PDF", "岗位截图");
+
+    const credentialRoot = document.getElementById("credential-editor");
+    if (credentialRoot) {
+      for (const element of Array.from(credentialRoot.querySelectorAll<HTMLElement>("span,p,strong"))) {
+        if (element.textContent?.includes("支持图片或 PDF")) element.textContent = element.textContent.replace("支持图片或 PDF", "当前 AI 仅支持图片识别；PDF 请先转成图片");
+        if (element.textContent?.includes("支持图片与 PDF")) element.textContent = element.textContent.replace("支持图片与 PDF", "当前 AI 仅支持图片；PDF 请先转成图片");
+        if (element.textContent?.includes("选择图片 / PDF")) element.textContent = element.textContent.replace("选择图片 / PDF", "选择图片");
+      }
     }
   }
 }
@@ -120,7 +123,7 @@ function fileInputGuard(event: Event, status: AiStatus | null) {
   const file = input.files[0];
   const accept = input.getAttribute("accept") || "";
 
-  if (file.type === "application/pdf" && status?.supportsPdfInput === false) {
+  if (file.type === "application/pdf" && status?.supportsPdfInput === false && input.dataset.pdfClientConvert !== "true") {
     window.alert("当前 DeepSeek 模型不支持直接读取 PDF。请先把 PDF 转成图片再上传；本次文件没有发送给 AI。");
     input.value = "";
     cancelEvent(event);
