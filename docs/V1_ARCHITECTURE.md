@@ -153,7 +153,7 @@ Response contains:
 
 The current runtime is **remote-AI only** and uses the server-side provider adapter. Production currently uses DeepSeek.
 
-If the provider is unavailable, misconfigured, rate-limited, or returns an invalid payload, the UI reports the failure. CareerVault does not switch to a deterministic local analyzer. The fact-storage layer remains provider-independent.
+If the provider is unavailable, misconfigured, rate-limited, or returns an invalid payload, the UI reports the failure. CareerVault does not synthesize substitute AI output. The fact-storage layer remains provider-independent.
 
 See `docs/AI_INTERVIEW_CONTRACT.md` for the full contract.
 
