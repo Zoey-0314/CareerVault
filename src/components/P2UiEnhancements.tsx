@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { CheckCircle2, ChevronRight, Gauge } from "lucide-react";
 import { getCareerReadiness } from "@/lib/careerReadiness";
-import { credentialFieldCopy } from "@/lib/credentialFieldCopy";
-import type { CredentialType, VaultState } from "@/lib/types";
+import type { VaultState } from "@/lib/types";
 
 const DB_NAME = "careervault";
 const DB_VERSION = 2;
@@ -51,33 +50,6 @@ function setTextIfChanged(element: HTMLElement | null, value: string) {
 
 function setPlaceholderIfChanged(element: HTMLInputElement | HTMLTextAreaElement | null, value: string) {
   if (element && element.placeholder !== value) element.placeholder = value;
-}
-
-function updateCredentialCopy() {
-  const root = document.getElementById("credential-editor");
-  if (!root) return;
-  const select = root.querySelector<HTMLSelectElement>("select");
-  if (!select) return;
-  const type = select.value as CredentialType;
-  const copy = credentialFieldCopy(type);
-  const form = root.querySelector<HTMLElement>(".formPanel");
-  if (!form) return;
-
-  const labels = Array.from(form.querySelectorAll<HTMLLabelElement>("label"));
-  for (const label of labels) {
-    const span = label.querySelector<HTMLSpanElement>(":scope > span");
-    const input = label.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
-    const text = span?.textContent || "";
-    if (/颁发|主办|发证|认证机构|评选|聘任单位|出具/.test(text) && input) {
-      setTextIfChanged(span, copy.issuerLabel);
-    } else if (/奖级|名次|考试等级|认证.*等级|职位.*任期|荣誉称号/.test(text) && input) {
-      setTextIfChanged(span, copy.rankLabel);
-      setPlaceholderIfChanged(input, copy.rankPlaceholder);
-    } else if (/为什么获得|对应了什么实际成果|证明了什么能力|参赛项目|任职.*成果/.test(text) && input) {
-      setTextIfChanged(span, copy.descriptionLabel);
-      setPlaceholderIfChanged(input, copy.descriptionPlaceholder);
-    }
-  }
 }
 
 export function P2UiEnhancements() {
