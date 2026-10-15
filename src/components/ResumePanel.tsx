@@ -144,7 +144,7 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
   if (!selectedExperiences.length) {
     return (
       <section className="sectionStack">
-        <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME</span><h2>{targetRole} · 需要远程 AI 定制</h2><p>{aiDraft ? "AI 已完成语义匹配，但没有找到足够相关且可验证的经历。" : "CareerVault 不再先生成规则版简历。只有远程 AI 成功完成语义选材和事实约束改写后，才会显示简历正文。"}</p></div>
+        <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME</span><h2>{targetRole} · 需要远程 AI 定制</h2><p>{aiDraft ? "AI 已完成语义匹配，但没有找到足够相关且可验证的经历。" : "只有远程 AI 成功完成语义选材和事实约束改写后，CareerVault 才会显示简历正文。"}</p></div>
         <article className="resumeGate panel"><Sparkles size={24} /><div><strong>{aiDraft ? "不强行填满简历" : "运行 AI 定制"}</strong><span>{aiDraft ? "补充相关经历或完善现有事实后再生成。" : "DeepSeek 会基于已保存事实进行选材和改写；调用失败时不会出现替代简历。"}</span></div><button className="button primary" disabled={aiGenerating} onClick={runAiTailoring}>{aiGenerating ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}{aiGenerating ? "正在匹配" : aiDraft ? "重新匹配" : "AI 定制简历"}</button></article>
         {aiError && <p className="inlineNote">{aiError}</p>}
       </section>
