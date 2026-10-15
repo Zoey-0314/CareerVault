@@ -12,7 +12,7 @@ import {
   VerticalAlign,
   WidthType,
 } from "docx";
-import { buildTargetedResumeBullets, buildTargetedSummary, inferTargetRole } from "@/lib/resume";
+import { inferTargetRole } from "@/lib/resume";
 import type { Credential, Experience, JobMatch, Profile } from "@/lib/types";
 
 export interface ResumeDocxInput {
@@ -56,8 +56,8 @@ function bullet(text: string) {
   return new Paragraph({ spacing: { after: 55, line: 255 }, bullet: { level: 0 }, children: [new TextRun({ text, size: 19, font: "Microsoft YaHei", color: "2B2D2C" })] });
 }
 
-function experienceRow(experience: Experience, matchedKeywords: string[], generatedBullets?: string[]) {
-  const bullets = generatedBullets?.length ? generatedBullets.slice(0, 3) : buildTargetedResumeBullets(experience, matchedKeywords);
+function experienceRow(experience: Experience, generatedBullets?: string[]) {
+  const bullets = generatedBullets?.slice(0, 3) || [];
   const dateText = [experience.startDate, experience.endDate || "至今"].filter(Boolean).join(" - ");
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE }, borders: noBorders,
@@ -72,8 +72,6 @@ export async function buildResumeDocx(input: ResumeDocxInput): Promise<Blob> {
   const { profile, jd, experiences, matches, credentials, generatedBullets } = input;
   const targetRole = input.targetRoleOverride?.trim() || inferTargetRole(jd);
   const matchMap = new Map(matches.map((item) => [item.experienceId, item]));
-  const allKeywords = Array.from(new Set(matches.flatMap((item) => item.matchedKeywords))).slice(0, 8);
-  const summary = buildTargetedSummary(profile, experiences, allKeywords);
 
   const header = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE }, borders: noBorders,
@@ -96,9 +94,8 @@ export async function buildResumeDocx(input: ResumeDocxInput): Promise<Blob> {
     new TableCell({ width: { size: 76, type: WidthType.PERCENTAGE }, margins: { top: 65, bottom: 65, left: 0, right: 0 }, children: [p([item.name, item.rank, item.issuer].filter(Boolean).join(" · "), { size: 18, after: 0 })] }),
   ] }));
 
-  const children: Array<Table | Paragraph> = [header, sectionHeading("教育背景", "Education"), education, sectionHeading("相关经历", "Experience"), ...experiences.map((experience) => experienceRow(experience, matchMap.get(experience.id)?.matchedKeywords || [], generatedBullets?.[experience.id]))];
+  const children: Array<Table | Paragraph> = [header, sectionHeading("教育背景", "Education"), education, sectionHeading("相关经历", "Experience"), ...experiences.map((experience) => experienceRow(experience, generatedBullets?.[experience.id]))];
   if (credentialRows.length) { children.push(sectionHeading("荣誉奖励", "Award")); children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: noBorders, rows: credentialRows })); }
-  children.push(sectionHeading("职业概述", "Profile")); children.push(p(summary, { size: 18, before: 80, after: 0 }));
 
   const doc = new Document({ styles: { default: { document: { run: { font: "Microsoft YaHei", size: 20, color: "222222" }, paragraph: { spacing: { line: 280 } } } } }, sections: [{ properties: { page: { margin: { top: 680, right: 700, bottom: 650, left: 700 } } }, children }] });
   return Packer.toBlob(doc);
