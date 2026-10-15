@@ -26,7 +26,6 @@ export interface AiCredentialResponse {
   inputKind?: "image" | "pdf" | "text";
   transcriptionUsed?: boolean;
   keyFieldVerificationUsed?: boolean;
-  fallbackUsed?: boolean;
 }
 
 export interface AiJdResponse {
@@ -52,7 +51,6 @@ function emitAiStatus(detail: {
   model?: string;
   message?: string;
   visionUsed?: boolean;
-  fallbackUsed?: boolean;
   inputKind?: "image" | "pdf" | "text";
 }) {
   if (typeof window === "undefined") return;
@@ -83,10 +81,6 @@ function recognitionMetadata(result: AiCredentialResponse, hasAttachment: boolea
   if (result.keyFieldVerificationUsed) {
     confidence += 13;
     notes.push("已重新查看原图核对关键字段");
-  }
-  if (result.fallbackUsed) {
-    confidence = Math.min(confidence, 62);
-    notes.push("结构化阶段使用了安全兜底，建议逐项人工核对");
   }
   if (result.assessment.needsConfirmation) {
     confidence -= 5;
@@ -189,7 +183,7 @@ export async function analyzeCredentialWithProvider(credential: Credential): Pro
     const normalized = raw as AiCredentialResponse;
     const recognition = recognitionMetadata(normalized, hasAttachment);
     if (recognition) normalized.assessment = recognition;
-    emitAiStatus({ operation: "credential", stage: "success", provider: normalized.provider, model: normalized.model, visionUsed: normalized.visionUsed, fallbackUsed: normalized.fallbackUsed, inputKind: normalized.inputKind, message: normalized.fallbackUsed ? "文件已读取；结构化结果使用了安全兜底，请人工核对" : "文件已读取并完成关键字段核对" });
+    emitAiStatus({ operation: "credential", stage: "success", provider: normalized.provider, model: normalized.model, visionUsed: normalized.visionUsed, inputKind: normalized.inputKind, message: "文件已读取并完成关键字段核对" });
     return normalized;
   } catch (error) {
     emitAiStatus({ operation: "credential", stage: "error", message: error instanceof Error ? error.message : "奖项/证书文件识别失败" });
