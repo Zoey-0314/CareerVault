@@ -13,17 +13,20 @@ import { ResumePanel } from "@/components/ResumePanel";
 import { analyzeCredentialWithProvider, analyzeInterviewWithProvider, analyzeJdFileWithProvider, isRemoteAiConfigured } from "@/lib/aiClient";
 import { getCloudUser, isCloudConfigured, loadVaultFromCloud, saveVaultToCloud, sendMagicLink, signOutCloud } from "@/lib/cloud";
 import { assessCredentialLocally, credentialLevelLabel, sortCredentials } from "@/lib/credentials";
+import { credentialFieldCopy } from "@/lib/credentialFieldCopy";
 import { getExperienceEvidenceStrength, reviewCandidateProfile } from "@/lib/hrRules";
 import { getExperienceReadiness, getNextInterviewQuestion, type InterviewGoal, type InterviewQuestion } from "@/lib/interview";
 import { applyConfirmedAgentFacts, type ExtractedFact } from "@/lib/interviewAgent";
 import { createEmptyJobTarget } from "@/lib/jobApplication";
 import { matchExperiences } from "@/lib/matching";
 import { createBackup, fileToCompressedDataUrl, fileToDataUrl, loadVaultState, parseBackup, saveVaultState } from "@/lib/persistence";
+import { pdfFileToImageDataUrls } from "@/lib/pdfToImages";
 import type { Credential, CredentialType, Experience, ExperienceType, JobTarget, Profile, ResumeVersion, VaultState } from "@/lib/types";
 import { buildWorkspaceImportPrompt, parseWorkspaceImport } from "@/lib/vibeImport";
 
 type Tab = "overview" | "profile" | "experiences" | "credentials" | "job" | "resume";
 const MAX_PDF_BYTES = 3 * 1024 * 1024;
+const MAX_JD_PDF_BYTES = 10 * 1024 * 1024;
 
 const emptyProfile: Profile = { name: "", email: "", phone: "", city: "", school: "", major: "", degree: "", graduation: "" };
 const emptyExperience = (): Experience => ({
@@ -147,6 +150,7 @@ export default function Home() {
   const localQuestion = useMemo(() => getNextInterviewQuestion(draft, skippedGoals), [draft, skippedGoals]);
   const currentQuestion = remoteInterviewEnabled ? agentQuestion : localQuestion;
   const sortedCredentials = useMemo(() => sortCredentials(credentials), [credentials]);
+  const credentialCopy = useMemo(() => credentialFieldCopy(credentialDraft.type), [credentialDraft.type]);
   const completion = Math.min(100, Math.round(
     ([profile.name, profile.email, profile.school, profile.major, profile.graduation].filter(Boolean).length / 5) * 30 +
     (Math.min(experiences.length, 3) / 3) * 40 + (Math.min(credentials.length, 2) / 2) * 10 + (jobTargets.length ? 20 : 0),
@@ -378,13 +382,26 @@ export default function Home() {
     if (!file) return;
     setJdImageAnalyzing(true); setJdImageNote("");
     try {
-      const prepared = await prepareUploadedFile(file);
-      const result = await analyzeJdFileWithProvider(prepared.dataUrl, file.name);
+      const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      let payload: string | string[];
+      let sourceLabel = "图片";
+      if (isPdf) {
+        if (file.size > MAX_JD_PDF_BYTES) throw new Error("JD PDF 请控制在 10 MB 以内；过大的文件请先压缩。");
+        setJdImageNote("正在浏览器内把 PDF 转成页面图片，不会把原始 PDF 直接发送给 DeepSeek…");
+        const pages = await pdfFileToImageDataUrls(file);
+        payload = pages;
+        sourceLabel = `PDF（已转为 ${pages.length} 页图片）`;
+      } else {
+        const prepared = await prepareUploadedFile(file);
+        payload = prepared.dataUrl;
+      }
+
+      const result = await analyzeJdFileWithProvider(payload, file.name);
       const nextJd = result.jdText.trim();
       setJd(nextJd);
       if (activeJobTargetId) changeJobTarget(activeJobTargetId, { jd: nextJd });
       setProviderLabel(result.model ? `GPT · ${result.model}` : "GPT");
-      setJdImageNote(`已确认读取 ${result.inputKind === "pdf" ? "PDF" : "图片"}：${file.name}。JD 已保存到当前岗位，不依赖原招聘链接。`);
+      setJdImageNote(`已确认读取 ${sourceLabel}：${file.name}。JD 已保存到当前岗位，不依赖原招聘链接。`);
     } catch (error) {
       setJdImageNote(error instanceof Error ? error.message : "岗位文件识别失败，请改为复制粘贴 JD。");
     } finally { setJdImageAnalyzing(false); }
@@ -497,8 +514,8 @@ export default function Home() {
           {credentialDraft.imageDataUrl && <img className="credentialPreview" src={credentialDraft.imageDataUrl} alt="奖项或证书预览" />}
           {credentialDraft.attachmentType === "application/pdf" && <div className="questionNotice"><FileText size={16} /><div><strong>已选择 PDF</strong><span>{credentialDraft.attachmentName || "credential.pdf"}</span></div></div>}
           {credentialNote && <p className="inlineNote">{credentialNote}</p>}
-          <div className="formGrid"><label><span>类型</span><select value={credentialDraft.type} onChange={(e) => setCredentialDraft({ ...credentialDraft, type: e.target.value as CredentialType })}>{Object.entries(credentialLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>名称</span><input value={credentialDraft.name} onChange={(e) => setCredentialDraft({ ...credentialDraft, name: e.target.value })} /></label><label><span>颁发 / 主办方</span><input value={credentialDraft.issuer} onChange={(e) => setCredentialDraft({ ...credentialDraft, issuer: e.target.value })} /></label><label><span>日期</span><input type="month" value={credentialDraft.date} onChange={(e) => setCredentialDraft({ ...credentialDraft, date: e.target.value })} /></label><label><span>奖级 / 名次 / 等级</span><input value={credentialDraft.rank} onChange={(e) => setCredentialDraft({ ...credentialDraft, rank: e.target.value })} /></label></div>
-          <label><span>你为什么获得它 / 它对应了什么实际成果</span><textarea rows={4} value={credentialDraft.description} onChange={(e) => setCredentialDraft({ ...credentialDraft, description: e.target.value })} /></label>
+          <div className="formGrid"><label><span>类型</span><select value={credentialDraft.type} onChange={(e) => setCredentialDraft({ ...credentialDraft, type: e.target.value as CredentialType })}>{Object.entries(credentialLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>名称</span><input value={credentialDraft.name} onChange={(e) => setCredentialDraft({ ...credentialDraft, name: e.target.value })} /></label><label><span>{credentialCopy.issuerLabel}</span><input value={credentialDraft.issuer} onChange={(e) => setCredentialDraft({ ...credentialDraft, issuer: e.target.value })} /></label><label><span>日期</span><input type="month" value={credentialDraft.date} onChange={(e) => setCredentialDraft({ ...credentialDraft, date: e.target.value })} /></label><label><span>{credentialCopy.rankLabel}</span><input value={credentialDraft.rank} placeholder={credentialCopy.rankPlaceholder} onChange={(e) => setCredentialDraft({ ...credentialDraft, rank: e.target.value })} /></label></div>
+          <label><span>{credentialCopy.descriptionLabel}</span><textarea rows={4} value={credentialDraft.description} placeholder={credentialCopy.descriptionPlaceholder} onChange={(e) => setCredentialDraft({ ...credentialDraft, description: e.target.value })} /></label>
           <div className="buttonRow"><button className="button secondary" disabled={credentialAnalyzing || (!credentialDraft.name.trim() && !credentialDraft.attachmentDataUrl && !credentialDraft.imageDataUrl)} onClick={() => analyzeCredential()}>{credentialAnalyzing ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}{credentialAnalyzing ? "判断中" : "重新判断"}</button><button className="button primary" disabled={!credentialDraft.name.trim()} onClick={saveCredential}>{editingCredentialId ? "保存修改" : "保存证书 / 奖项"}</button></div>
         </article><article className="panel assessmentPanel"><div className="panelHeading"><div><span className="eyebrow">CREDENTIAL REVIEW</span><h3>专业判断</h3></div><span className="statusPill"><Sparkles size={14} />{credentialProvider}</span></div>{!credentialDraft.assessment ? <div className="emptyState">上传图片/PDF或填写基本信息后再判断。</div> : <><div className="credentialScore"><strong>{credentialDraft.assessment.score}</strong><div><span>{credentialDraft.assessment.tier}</span><small>{credentialLevelLabel(credentialDraft.assessment.level)}</small></div></div><div className="rationaleList">{credentialDraft.assessment.rationale.map((reason) => <div key={reason}><Check size={14} /><span>{reason}</span></div>)}</div><div className="proofBox"><span className="eyebrow">WHAT IT PROVES</span><p>{credentialDraft.assessment.whatItProves}</p></div>{credentialDraft.assessment.followUpQuestion && <div className="followUp"><CircleAlert size={17} /><div><strong>还缺一个关键事实</strong><p>{credentialDraft.assessment.followUpQuestion}</p><textarea rows={3} value={credentialDraft.followUpAnswer || ""} onChange={(e) => setCredentialDraft({ ...credentialDraft, followUpAnswer: e.target.value })} /><button className="button secondary small" disabled={!credentialDraft.followUpAnswer?.trim() || credentialAnalyzing} onClick={reanalyzeCredentialFollowUp}>补充后重新判断</button></div></div>}</>}</article></div>
         <div className="libraryHeader"><div><span className="eyebrow">CREDENTIAL VAULT</span><h3>已保存</h3></div><span>{credentials.length} 项</span></div>{credentials.length === 0 ? <div className="emptyState panel">还没有保存的奖项或证书。</div> : <div className="cardGrid">{sortedCredentials.map((item) => <article className="assetCard credentialCard" key={item.id}>{item.imageDataUrl && <img src={item.imageDataUrl} alt="证书缩略图" />}{item.attachmentType === "application/pdf" && <div className="questionNotice"><FileText size={15} /><span>{item.attachmentName || "PDF"}</span></div>}<div className="assetTop"><span className="softTag">{credentialLabels[item.type]}</span><div className="buttonRow"><button className="iconButton" onClick={() => editCredential(item)}><Pencil size={15} /></button><button className="iconButton" onClick={() => setCredentials((current) => current.filter((x) => x.id !== item.id))}><Trash2 size={15} /></button></div></div><h4>{item.name}</h4><span className="metaLine">{item.issuer || "未知颁发方"}{item.rank ? ` · ${item.rank}` : ""}</span>{item.assessment && <div className="credentialMiniScore"><strong>{item.assessment.score}</strong><span>{item.assessment.tier} · {credentialLevelLabel(item.assessment.level)}</span></div>}<p>{item.assessment?.whatItProves || item.description}</p></article>)}</div>}
