@@ -52,7 +52,6 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
     });
   }, [aiDraft, matches]);
 
-  const matchMap = useMemo(() => new Map(selectedMatches.map((item) => [item.experienceId, item])), [selectedMatches]);
   const aiSelectionMap = useMemo(() => new Map((aiDraft?.selected || []).map((item) => [item.experienceId, item])), [aiDraft]);
   const generatedBullets = useMemo(() => Object.fromEntries((aiDraft?.selected || []).map((item) => [item.experienceId, item.bullets.map((bullet) => bullet.text)])), [aiDraft]);
   const keywords = useMemo(() => Array.from(new Set(selectedMatches.flatMap((item) => item.matchedKeywords))).slice(0, 10), [selectedMatches]);
@@ -155,7 +154,7 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
   return (
     <section className="sectionStack">
       <div className="resumeToolbar">
-        <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME · JD TAILORED</span><h2>{targetRole}</h2><p>{aiDraft ? "AI 已按 JD 做语义选材和事实约束改写；每条 bullet 都必须引用 CareerVault 中真实存在的事实。" : "远程 AI 已完成语义选材和事实约束改写。"}</p></div>
+        <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME · JD TAILORED</span><h2>{targetRole}</h2><p>远程 AI 已按 JD 做语义选材和事实约束改写；每条 bullet 都必须引用 CareerVault 中真实存在的事实。</p></div>
         <div className="buttonRow"><button className="button secondary" disabled={aiGenerating} onClick={runAiTailoring}>{aiGenerating ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}{aiGenerating ? "AI 定制中" : aiDraft ? "重新 AI 定制" : "AI 定制简历"}</button><button className="button secondary" disabled={!activeJobTargetId || !onSaveVersion} onClick={saveSnapshot}><Archive size={16} />保存投递版快照</button><button className="button primary resumeExport" disabled={exporting} onClick={exportWord}>{exporting ? <Loader2 className="spin" size={16} /> : <Download size={16} />}{exporting ? "正在生成 Word" : "导出 Word"}</button></div>
       </div>
 
