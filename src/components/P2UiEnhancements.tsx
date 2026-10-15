@@ -44,53 +44,33 @@ function clickNav(label: string) {
   button?.click();
 }
 
-function setTextIfChanged(element: HTMLElement | null, value: string) {
-  if (element && element.textContent !== value) element.textContent = value;
-}
-
-function setPlaceholderIfChanged(element: HTMLInputElement | HTMLTextAreaElement | null, value: string) {
-  if (element && element.placeholder !== value) element.placeholder = value;
-}
-
 export function P2UiEnhancements() {
   const [state, setState] = useState<VaultState | null>(null);
   const [overviewTarget, setOverviewTarget] = useState<Element | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    let lastCredentialEditor: Element | null = null;
 
     const refresh = async () => {
       const value = await readRawVaultState();
       if (!cancelled) setState(value);
     };
 
-    const syncMountedViews = () => {
-      setOverviewTarget(document.querySelector(".heroPanel")?.closest(".sectionStack") || null);
-      const credentialEditor = document.getElementById("credential-editor");
-      if (credentialEditor !== lastCredentialEditor) {
-        lastCredentialEditor = credentialEditor;
-        if (credentialEditor) updateCredentialCopy();
-      }
+    const syncOverviewTarget = () => {
+      const next = document.querySelector(".heroPanel")?.closest(".sectionStack") || null;
+      setOverviewTarget((current) => current === next ? current : next);
     };
 
     void refresh();
     const timer = window.setInterval(refresh, 1800);
-    const observer = new MutationObserver(syncMountedViews);
+    const observer = new MutationObserver(syncOverviewTarget);
     observer.observe(document.body, { subtree: true, childList: true });
-    syncMountedViews();
-
-    const onChange = (event: Event) => {
-      const target = event.target as Element | null;
-      if (target?.closest("#credential-editor")) updateCredentialCopy();
-    };
-    document.addEventListener("change", onChange, true);
+    syncOverviewTarget();
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
       observer.disconnect();
-      document.removeEventListener("change", onChange, true);
     };
   }, []);
 
