@@ -19,8 +19,8 @@ type AiStatus = {
 
 type AiActivity = {
   operation?: "interview" | "credential" | "jd";
-  stage?: "start" | "success" | "error" | "local";
-  provider?: "openai" | "deepseek" | "local-v1";
+  stage?: "start" | "success" | "error";
+  provider?: "openai" | "deepseek";
   model?: string;
   message?: string;
   visionUsed?: boolean;
@@ -144,7 +144,6 @@ function activityLabel(activity: AiActivity | null) {
   const prefix = activity.operation === "credential" ? "证书" : activity.operation === "jd" ? "JD" : "经历";
   if (activity.stage === "start") return `${prefix} · 处理中`;
   if (activity.stage === "error") return `${prefix} · 调用失败`;
-  if (activity.stage === "local") return `${prefix} · 本地规则`;
   if (activity.stage === "success") return activity.fallbackUsed ? `${prefix} · 已读取 / 需核对` : `${prefix} · 已完成`;
   return "";
 }
@@ -279,7 +278,7 @@ export function ProviderUiSync() {
         letterSpacing: ".02em",
       }}
     >
-      <span>Build {buildSha === "local" ? "local" : buildSha.slice(0, 7)}</span>
+      <span>Build {buildSha === "local" ? "dev" : buildSha.slice(0, 7)}</span>
       <span>·</span>
       <span>{provider}</span>
       <span>·</span>
