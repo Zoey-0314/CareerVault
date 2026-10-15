@@ -150,7 +150,7 @@ export function isRemoteAiConfigured(): boolean {
 
 export async function analyzeInterviewWithProvider(answer: string, experience: Experience, context: InterviewTurnContext = {}): Promise<AiInterviewResponse> {
   const url = endpointFor("interview");
-  if (!url) throw new Error("当前部署未配置 AI 服务。CareerVault 不再使用本地规则兜底。");
+  if (!url) throw new Error("当前部署未配置 AI 服务。请检查远程 Provider 配置。");
   emitAiStatus({ operation: "interview", stage: "start", message: answer ? "正在分析本轮回答并决定下一问" : "正在阅读已有经历并决定下一问" });
   try {
     const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer, experience, previousQuestion: context.previousQuestion || null, askedQuestions: context.askedQuestions || [] }) });
