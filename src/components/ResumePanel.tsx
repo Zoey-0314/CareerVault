@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Archive, Check, Download, FileText, Loader2, Sparkles, Target } from "lucide-react";
 import { sortCredentials } from "@/lib/credentials";
 import { newResumeVersionId } from "@/lib/jobApplication";
-import { buildTargetedResumeBullets, buildTargetedSummary, inferTargetRole } from "@/lib/resume";
+import { inferTargetRole } from "@/lib/resume";
 import { generateGroundedResumeDraft, type GroundedResumeDraft } from "@/lib/resumeAi";
 import { downloadResumeDocx } from "@/lib/resumeDocx";
 import type { Credential, Experience, JobMatch, Profile, ResumeVersion } from "@/lib/types";
@@ -38,24 +38,19 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
   const [aiError, setAiError] = useState("");
   const [snapshotNote, setSnapshotNote] = useState("");
 
-  const deterministicMatches = useMemo(() => {
-    if (!jd.trim()) return [];
-    return matches.filter((item) => item.matchedKeywords.length > 0).slice(0, 3);
-  }, [jd, matches]);
-
   const selectedExperiences = useMemo(() => {
-    const ids = aiDraft ? aiDraft.selected.map((item) => item.experienceId) : deterministicMatches.map((item) => item.experienceId);
+    const ids = aiDraft?.selected.map((item) => item.experienceId) || [];
     return ids.map((id) => experiences.find((item) => item.id === id)).filter(Boolean) as Experience[];
-  }, [aiDraft, deterministicMatches, experiences]);
+  }, [aiDraft, experiences]);
 
   const selectedMatches = useMemo<JobMatch[]>(() => {
-    if (!aiDraft) return deterministicMatches;
+    if (!aiDraft) return [];
     return aiDraft.selected.map((selection) => matches.find((item) => item.experienceId === selection.experienceId) || {
       experienceId: selection.experienceId,
       score: Math.round(selection.relevanceScore),
       matchedKeywords: [],
     });
-  }, [aiDraft, deterministicMatches, matches]);
+  }, [aiDraft, matches]);
 
   const matchMap = useMemo(() => new Map(selectedMatches.map((item) => [item.experienceId, item])), [selectedMatches]);
   const aiSelectionMap = useMemo(() => new Map((aiDraft?.selected || []).map((item) => [item.experienceId, item])), [aiDraft]);
@@ -74,12 +69,9 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
       .slice(0, 3);
   }, [credentials, keywords]);
 
-  const summary = useMemo(() => buildTargetedSummary(profile, selectedExperiences, keywords), [profile, selectedExperiences, keywords]);
-
   function currentBullets(experience: Experience) {
     const aiSelection = aiSelectionMap.get(experience.id);
-    if (aiSelection) return aiSelection.bullets.map((bullet) => bullet.text);
-    return buildTargetedResumeBullets(experience, matchMap.get(experience.id)?.matchedKeywords || []);
+    return aiSelection ? aiSelection.bullets.map((bullet) => bullet.text) : [];
   }
 
   async function runAiTailoring() {
@@ -99,7 +91,7 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
   }
 
   function saveSnapshot() {
-    if (!activeJobTargetId || !onSaveVersion || !selectedExperiences.length) return;
+    if (!activeJobTargetId || !onSaveVersion || !aiDraft || !selectedExperiences.length) return;
     const createdAt = new Date().toISOString();
     const version: ResumeVersion = {
       id: newResumeVersionId(),
@@ -107,12 +99,12 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
       createdAt,
       label: `${targetRole} · ${new Date(createdAt).toLocaleString(undefined, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`,
       targetRole,
-      summary,
+      summary: "",
       selectedExperienceIds: selectedExperiences.map((item) => item.id),
       experienceBullets: selectedExperiences.map((item) => ({ experienceId: item.id, bullets: currentBullets(item) })),
       credentialIds: resumeCredentials.map((item) => item.id),
-      provider: aiDraft?.provider || "deterministic",
-      model: aiDraft?.model,
+      provider: aiDraft.provider,
+      model: aiDraft.model,
       jdSnapshot: jd,
     };
     onSaveVersion(version);
@@ -120,7 +112,7 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
   }
 
   async function exportWord() {
-    if (!jd.trim() || !selectedExperiences.length || exporting) return;
+    if (!jd.trim() || !aiDraft || !selectedExperiences.length || exporting) return;
     setExporting(true);
     try {
       await downloadResumeDocx({
@@ -129,8 +121,8 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
         experiences: selectedExperiences,
         matches: selectedMatches,
         credentials: resumeCredentials,
-        generatedBullets: aiDraft ? generatedBullets : undefined,
-        targetRoleOverride: aiDraft?.targetRole || undefined,
+        generatedBullets,
+        targetRoleOverride: aiDraft.targetRole,
       });
     } finally {
       setExporting(false);
@@ -153,8 +145,8 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
   if (!selectedExperiences.length) {
     return (
       <section className="sectionStack">
-        <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME</span><h2>{targetRole} · 暂无足够匹配证据</h2><p>{aiDraft ? "AI 已完成语义匹配，但没有找到足够相关且可验证的经历。" : "关键词匹配没有直接命中，可以让 AI 再做一次语义匹配。"}</p></div>
-        <article className="resumeGate panel"><Sparkles size={24} /><div><strong>{aiDraft ? "不强行填满简历" : "尝试 AI 语义匹配"}</strong><span>{aiDraft ? "补充相关经历或完善现有事实后再生成。" : "DeepSeek 会理解 JD 与经历的语义关系，不要求文字完全相同；仍然只能使用已保存事实。"}</span></div><button className="button primary" disabled={aiGenerating} onClick={runAiTailoring}>{aiGenerating ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}{aiGenerating ? "正在匹配" : aiDraft ? "重新匹配" : "AI 语义匹配"}</button></article>
+        <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME</span><h2>{targetRole} · 需要远程 AI 定制</h2><p>{aiDraft ? "AI 已完成语义匹配，但没有找到足够相关且可验证的经历。" : "CareerVault 不再先生成规则版简历。只有远程 AI 成功完成语义选材和事实约束改写后，才会显示简历正文。"}</p></div>
+        <article className="resumeGate panel"><Sparkles size={24} /><div><strong>{aiDraft ? "不强行填满简历" : "运行 AI 定制"}</strong><span>{aiDraft ? "补充相关经历或完善现有事实后再生成。" : "DeepSeek 会基于已保存事实进行选材和改写；调用失败时不会出现替代简历。"}</span></div><button className="button primary" disabled={aiGenerating} onClick={runAiTailoring}>{aiGenerating ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}{aiGenerating ? "正在匹配" : aiDraft ? "重新匹配" : "AI 定制简历"}</button></article>
         {aiError && <p className="inlineNote">{aiError}</p>}
       </section>
     );
@@ -163,7 +155,7 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
   return (
     <section className="sectionStack">
       <div className="resumeToolbar">
-        <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME · JD TAILORED</span><h2>{targetRole}</h2><p>{aiDraft ? "AI 已按 JD 做语义选材和事实约束改写；每条 bullet 都必须引用 CareerVault 中真实存在的事实。" : "当前先使用确定性规则选材；可运行 AI 定制进行语义匹配和专业改写。"}</p></div>
+        <div className="sectionIntro"><span className="eyebrow">ONE-PAGE RESUME · JD TAILORED</span><h2>{targetRole}</h2><p>{aiDraft ? "AI 已按 JD 做语义选材和事实约束改写；每条 bullet 都必须引用 CareerVault 中真实存在的事实。" : "远程 AI 已完成语义选材和事实约束改写。"}</p></div>
         <div className="buttonRow"><button className="button secondary" disabled={aiGenerating} onClick={runAiTailoring}>{aiGenerating ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}{aiGenerating ? "AI 定制中" : aiDraft ? "重新 AI 定制" : "AI 定制简历"}</button><button className="button secondary" disabled={!activeJobTargetId || !onSaveVersion} onClick={saveSnapshot}><Archive size={16} />保存投递版快照</button><button className="button primary resumeExport" disabled={exporting} onClick={exportWord}>{exporting ? <Loader2 className="spin" size={16} /> : <Download size={16} />}{exporting ? "正在生成 Word" : "导出 Word"}</button></div>
       </div>
 
@@ -190,7 +182,7 @@ export function ResumePanel({ profile, jd, experiences, matches, credentials, ac
 
         {resumeCredentials.length > 0 && <><div className="resumeBand"><strong>荣誉奖励</strong><em>Award</em></div>{resumeCredentials.map((item) => <section className="referenceRow compactReferenceRow" key={item.id}><div className="referenceMeta"><strong>{item.date || ""}</strong><span>{item.rank || ""}</span></div><div className="referenceContent"><strong>{item.name}</strong><p>{[item.issuer, item.assessment?.whatItProves].filter(Boolean).join(" · ")}</p></div></section>)}</>}
 
-        <div className="resumeBand"><strong>职业概述</strong><em>Profile</em></div><section className="resumeSummary"><p>{summary}</p></section>
+        
       </article>
     </section>
   );
