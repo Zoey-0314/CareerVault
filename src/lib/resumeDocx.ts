@@ -69,9 +69,8 @@ function experienceRow(experience: Experience, generatedBullets?: string[]) {
 }
 
 export async function buildResumeDocx(input: ResumeDocxInput): Promise<Blob> {
-  const { profile, jd, experiences, matches, credentials, generatedBullets } = input;
+  const { profile, jd, experiences, credentials, generatedBullets } = input;
   const targetRole = input.targetRoleOverride?.trim() || inferTargetRole(jd);
-  const matchMap = new Map(matches.map((item) => [item.experienceId, item]));
 
   const header = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE }, borders: noBorders,
