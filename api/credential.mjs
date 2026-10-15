@@ -82,108 +82,6 @@ function normalizeType(value, evidence = "") {
   return "other";
 }
 
-function nonEmpty(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-const ENGLISH_MONTHS = {
-  january: "01", february: "02", march: "03", april: "04", may: "05", june: "06",
-  july: "07", august: "08", september: "09", october: "10", november: "11", december: "12",
-};
-
-function englishDateToMonth(text) {
-  const match = String(text || "").match(/\b\d{1,2}\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b/i);
-  if (!match) return "";
-  return `${match[2]}-${ENGLISH_MONTHS[match[1].toLowerCase()]}`;
-}
-
-function looksGenericTitle(value) {
-  return /^(certificate|certificate of completion|certificate of achievement|证书|荣誉证书|聘书|奖状)$/i.test(String(value || "").trim());
-}
-
-export function fallbackFromEvidence(transcription, visualKeyFields, safeCredential) {
-  const text = String(transcription || "").replace(/\[无法辨认\]/g, "").trim();
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const key = visualKeyFields && typeof visualKeyFields === "object" ? visualKeyFields : {};
-
-  const issuer = safeCredential.issuer
-    || nonEmpty(key.issuer)
-    || lines.find((line) => /(Digital Industries Software|Xcelerator Academy|Academy|University|Institute|College|Corporation|Company|Co\.|Ltd\.?|Inc\.?|大学|学院|学校|学生会|委员会|工作部|处|中心|协会|学会|公司|集团|组织)/i.test(line))
-    || "";
-
-  const numericOrChineseDate = text.match(/(20\d{2}[年\-/.]\s*\d{1,2}月?|20\d{2}[年\-/.]\s*\d{1,2}[月\-/.]\s*\d{1,2}日?|二[〇○零一二三四五六七八九]{3}年(?:[一二三四五六七八九十]{1,3}月)?)/)?.[1] || "";
-  const date = safeCredential.date || nonEmpty(key.date) || englishDateToMonth(text) || numericOrChineseDate;
-
-  const substantiveName = nonEmpty(key.credentialName)
-    || nonEmpty(key.role)
-    || lines.find((line) =>
-      !looksGenericTitle(line)
-      && /(NX\s*CAD|CAD|CAE|CAM|Senior Operator|Operator|Engineer|Specialist|Professional|Practitioner|资格|认证|操作员|工程师|专家)/i.test(line)
-    )
-    || "";
-
-  const rank = safeCredential.rank
-    || nonEmpty(key.rank)
-    || nonEmpty(key.role)
-    || substantiveName
-    || lines.find((line) => /(优秀班委|优秀学生|优秀干部|一等奖|二等奖|三等奖|金奖|银奖|铜奖|骨干|部长|干事|名次|等级)/.test(line))
-    || "";
-
-  const documentTitle = nonEmpty(key.title) || lines.find((line) => /荣誉证书|聘书|奖状|证书|CERTIFICATE/i.test(line)) || "";
-  const certificateNumber = nonEmpty(key.certificateNumber)
-    || lines.find((line) => /\b20\d{2}\s+[A-Z]\d{2}\s+\d{4,}\s+\d{2,}\b/i.test(line))
-    || "";
-
-  let name = safeCredential.name || "";
-  if (!name) {
-    if (substantiveName) name = substantiveName;
-    else if (/优秀班委/.test(`${rank} ${text}`)) name = "优秀班委荣誉证书";
-    else if (/聘书/.test(`${documentTitle} ${text}`) && rank) name = `${rank}聘书`;
-    else if (rank && /荣誉证书|表彰/.test(`${documentTitle} ${text}`)) name = `${rank}荣誉证书`;
-    else if (documentTitle && !looksGenericTitle(documentTitle)) name = documentTitle;
-    else name = rank || documentTitle || "证书/奖项";
-  }
-
-  const type = normalizeType(documentTitle, `${text} ${rank} ${substantiveName}`);
-  const description = safeCredential.description || [
-    substantiveName ? `认证/证明内容：${substantiveName}` : rank ? `证明/表彰内容：${rank}` : "",
-    certificateNumber ? `证书编号：${certificateNumber}` : "",
-  ].filter(Boolean).join("；");
-
-  let score = 35;
-  if (name && !looksGenericTitle(name)) score += 12;
-  if (issuer) score += 8;
-  if (date) score += 4;
-  if (rank || substantiveName) score += 8;
-  if (certificateNumber) score += 3;
-  score = Math.min(70, score);
-
-  const tier = score >= 65 ? "有效" : score >= 50 ? "补充" : "信息不足";
-  const level = type === "certificate" && issuer ? "industry" : /上海大学/.test(`${text} ${issuer}`) ? "school" : "unknown";
-  const rationale = [
-    issuer ? `已识别发证/颁发机构：${issuer}。` : "发证/颁发机构仍需人工核对。",
-    substantiveName ? `已识别具体认证/资格：${substantiveName}。` : "证书具体认证内容仍不够明确。",
-    certificateNumber ? "证书编号已识别，可用于后续人工核验。" : "",
-    "结构化模型本轮返回不稳定，当前结果由已转录文字和关键字段安全恢复；请保存前核对。",
-  ].filter(Boolean);
-
-  return {
-    extracted: { name, issuer, date, rank, description, type },
-    assessment: {
-      score,
-      tier,
-      level,
-      rationale,
-      whatItProves: substantiveName
-        ? `证明持证人获得或被认可为“${substantiveName}”；具体能力范围以证书及认证标准为准。`
-        : rank || name || "该材料可作为相关任职、荣誉或获奖经历的证明。",
-      followUpQuestion: null,
-      needsConfirmation: true,
-    },
-    fallbackUsed: true,
-  };
-}
-
 const transcriptionInstructions = `You are a document transcription engine for CareerVault.
 Your ONLY job is to read the uploaded credential image and transcribe visible text faithfully.
 - Do not classify, score, summarize, infer, or rewrite the document.
@@ -367,20 +265,21 @@ export default async function handler(req, res) {
 
     const rawText = extractOutputText(payload);
     let parsed = tryParseJson(rawText);
-    let fallbackUsed = false;
     if (!parsed?.extracted || !parsed?.assessment || typeof parsed.assessment.score !== "number") {
-      const repaired = await repairStructuredReview(ai, {
+      parsed = await repairStructuredReview(ai, {
         credential: safeCredential,
         transcribedDocument,
         visualKeyFields,
       }, rawText);
-      if (repaired) {
-        parsed = repaired;
-      } else if (transcribedDocument || visualKeyFields) {
-        parsed = fallbackFromEvidence(transcribedDocument, visualKeyFields, safeCredential);
-        fallbackUsed = true;
-      } else {
-        return json(res, 502, { error: "invalid_model_payload", provider: ai.provider, detail: "第二阶段识别结果缺少必要字段。", model: ai.model }, responseOrigin);
+      if (!parsed) {
+        return json(res, 502, {
+          error: "invalid_model_payload",
+          provider: ai.provider,
+          detail: "AI 已读取材料，但结构化判断连续两次未返回有效结果。本次不会使用本地规则生成评分，请重新识别。",
+          model: ai.model,
+          transcription: transcribedDocument,
+          visualKeyFields,
+        }, responseOrigin);
       }
     }
 
@@ -402,7 +301,6 @@ export default async function handler(req, res) {
       transcription: transcribedDocument,
       keyFieldVerificationUsed: Boolean(visualKeyFields),
       visualKeyFields,
-      fallbackUsed: fallbackUsed || Boolean(parsed.fallbackUsed),
       ...parsed,
     }, responseOrigin);
   } catch (error) {
