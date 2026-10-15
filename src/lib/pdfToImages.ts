@@ -30,7 +30,7 @@ export async function pdfFileToImageDataUrls(file: File, maxPages = MAX_PDF_PAGE
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("浏览器无法创建 PDF 页面画布。");
 
-    await page.render({ canvasContext: context, viewport }).promise;
+    await page.render({ canvas, canvasContext: context, viewport }).promise;
     images.push(canvas.toDataURL("image/jpeg", 0.82));
     page.cleanup();
   }
