@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { CheckCircle2, ChevronRight, Gauge } from "lucide-react";
 import { getCareerReadiness } from "@/lib/careerReadiness";
-import { credentialFieldCopy } from "@/lib/credentialFieldCopy";
-import type { CredentialType, VaultState } from "@/lib/types";
+import type { VaultState } from "@/lib/types";
 
 const DB_NAME = "careervault";
 const DB_VERSION = 2;
@@ -45,80 +44,33 @@ function clickNav(label: string) {
   button?.click();
 }
 
-function setTextIfChanged(element: HTMLElement | null, value: string) {
-  if (element && element.textContent !== value) element.textContent = value;
-}
-
-function setPlaceholderIfChanged(element: HTMLInputElement | HTMLTextAreaElement | null, value: string) {
-  if (element && element.placeholder !== value) element.placeholder = value;
-}
-
-function updateCredentialCopy() {
-  const root = document.getElementById("credential-editor");
-  if (!root) return;
-  const select = root.querySelector<HTMLSelectElement>("select");
-  if (!select) return;
-  const type = select.value as CredentialType;
-  const copy = credentialFieldCopy(type);
-  const form = root.querySelector<HTMLElement>(".formPanel");
-  if (!form) return;
-
-  const labels = Array.from(form.querySelectorAll<HTMLLabelElement>("label"));
-  for (const label of labels) {
-    const span = label.querySelector<HTMLSpanElement>(":scope > span");
-    const input = label.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
-    const text = span?.textContent || "";
-    if (/颁发|主办|发证|认证机构|评选|聘任单位|出具/.test(text) && input) {
-      setTextIfChanged(span, copy.issuerLabel);
-    } else if (/奖级|名次|考试等级|认证.*等级|职位.*任期|荣誉称号/.test(text) && input) {
-      setTextIfChanged(span, copy.rankLabel);
-      setPlaceholderIfChanged(input, copy.rankPlaceholder);
-    } else if (/为什么获得|对应了什么实际成果|证明了什么能力|参赛项目|任职.*成果/.test(text) && input) {
-      setTextIfChanged(span, copy.descriptionLabel);
-      setPlaceholderIfChanged(input, copy.descriptionPlaceholder);
-    }
-  }
-}
-
 export function P2UiEnhancements() {
   const [state, setState] = useState<VaultState | null>(null);
   const [overviewTarget, setOverviewTarget] = useState<Element | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    let lastCredentialEditor: Element | null = null;
 
     const refresh = async () => {
       const value = await readRawVaultState();
       if (!cancelled) setState(value);
     };
 
-    const syncMountedViews = () => {
-      setOverviewTarget(document.querySelector(".heroPanel")?.closest(".sectionStack") || null);
-      const credentialEditor = document.getElementById("credential-editor");
-      if (credentialEditor !== lastCredentialEditor) {
-        lastCredentialEditor = credentialEditor;
-        if (credentialEditor) updateCredentialCopy();
-      }
+    const syncOverviewTarget = () => {
+      const next = document.querySelector(".heroPanel")?.closest(".sectionStack") || null;
+      setOverviewTarget((current) => current === next ? current : next);
     };
 
     void refresh();
     const timer = window.setInterval(refresh, 1800);
-    const observer = new MutationObserver(syncMountedViews);
+    const observer = new MutationObserver(syncOverviewTarget);
     observer.observe(document.body, { subtree: true, childList: true });
-    syncMountedViews();
-
-    const onChange = (event: Event) => {
-      const target = event.target as Element | null;
-      if (target?.closest("#credential-editor")) updateCredentialCopy();
-    };
-    document.addEventListener("change", onChange, true);
+    syncOverviewTarget();
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
       observer.disconnect();
-      document.removeEventListener("change", onChange, true);
     };
   }, []);
 

@@ -1,19 +1,8 @@
 import type { Experience, InterviewDebrief, InterviewPrepPlan, ResumeVersion } from "@/lib/types";
-
-const DEFAULT_PUBLIC_PROXY = "https://career-vault-sage.vercel.app/api/interview-prep";
+import { resolveAiEndpoint } from "@/lib/aiEndpoint";
 
 function endpoint(): string | undefined {
-  const configured = process.env.NEXT_PUBLIC_CAREERVAULT_AI_URL?.trim();
-  if (configured) {
-    const base = configured.replace(/\/$/, "");
-    if (/\/api\/(interview|credential|jd|resume|interview-prep)$/.test(base)) return base.replace(/\/api\/(interview|credential|jd|resume|interview-prep)$/, "/api/interview-prep");
-    return `${base}/api/interview-prep`;
-  }
-  if (typeof window !== "undefined") {
-    if (window.location.hostname.endsWith("vercel.app")) return `${window.location.origin}/api/interview-prep`;
-    if (window.location.hostname === "zoey-0314.github.io") return DEFAULT_PUBLIC_PROXY;
-  }
-  return undefined;
+  return resolveAiEndpoint("interview-prep");
 }
 
 async function readError(response: Response) {

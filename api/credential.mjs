@@ -86,35 +86,97 @@ function nonEmpty(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function fallbackFromEvidence(transcription, visualKeyFields, safeCredential) {
+const ENGLISH_MONTHS = {
+  january: "01", february: "02", march: "03", april: "04", may: "05", june: "06",
+  july: "07", august: "08", september: "09", october: "10", november: "11", december: "12",
+};
+
+function englishDateToMonth(text) {
+  const match = String(text || "").match(/\b\d{1,2}\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b/i);
+  if (!match) return "";
+  return `${match[2]}-${ENGLISH_MONTHS[match[1].toLowerCase()]}`;
+}
+
+function looksGenericTitle(value) {
+  return /^(certificate|certificate of completion|certificate of achievement|证书|荣誉证书|聘书|奖状)$/i.test(String(value || "").trim());
+}
+
+export function fallbackFromEvidence(transcription, visualKeyFields, safeCredential) {
   const text = String(transcription || "").replace(/\[无法辨认\]/g, "").trim();
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const key = visualKeyFields && typeof visualKeyFields === "object" ? visualKeyFields : {};
-  const issuer = safeCredential.issuer || nonEmpty(key.issuer) || [...lines].reverse().find((line) => /(大学|学院|学校|学生会|委员会|工作部|处|中心|协会|学会|公司|集团|组织)/.test(line)) || "";
-  const date = safeCredential.date || nonEmpty(key.date) || (text.match(/(20\d{2}[年\-/.]\s*\d{1,2}月?|20\d{2}[年\-/.]\s*\d{1,2}[月\-/.]\s*\d{1,2}日?|二[〇○零一二三四五六七八九]{3}年(?:[一二三四五六七八九十]{1,3}月)?)/)?.[1] || "");
-  const rank = safeCredential.rank || nonEmpty(key.rank) || nonEmpty(key.role) || lines.find((line) => /(优秀班委|优秀学生|优秀干部|一等奖|二等奖|三等奖|金奖|银奖|铜奖|骨干|部长|干事|名次|等级)/.test(line)) || "";
-  const titleLine = nonEmpty(key.title) || lines.find((line) => /荣誉证书|聘书|奖状|证书|CERTIFICATE/i.test(line)) || "";
+
+  const issuer = safeCredential.issuer
+    || nonEmpty(key.issuer)
+    || lines.find((line) => /(Digital Industries Software|Xcelerator Academy|Academy|University|Institute|College|Corporation|Company|Co\.|Ltd\.?|Inc\.?|大学|学院|学校|学生会|委员会|工作部|处|中心|协会|学会|公司|集团|组织)/i.test(line))
+    || "";
+
+  const numericOrChineseDate = text.match(/(20\d{2}[年\-/.]\s*\d{1,2}月?|20\d{2}[年\-/.]\s*\d{1,2}[月\-/.]\s*\d{1,2}日?|二[〇○零一二三四五六七八九]{3}年(?:[一二三四五六七八九十]{1,3}月)?)/)?.[1] || "";
+  const date = safeCredential.date || nonEmpty(key.date) || englishDateToMonth(text) || numericOrChineseDate;
+
+  const substantiveName = nonEmpty(key.credentialName)
+    || nonEmpty(key.role)
+    || lines.find((line) =>
+      !looksGenericTitle(line)
+      && /(NX\s*CAD|CAD|CAE|CAM|Senior Operator|Operator|Engineer|Specialist|Professional|Practitioner|资格|认证|操作员|工程师|专家)/i.test(line)
+    )
+    || "";
+
+  const rank = safeCredential.rank
+    || nonEmpty(key.rank)
+    || nonEmpty(key.role)
+    || substantiveName
+    || lines.find((line) => /(优秀班委|优秀学生|优秀干部|一等奖|二等奖|三等奖|金奖|银奖|铜奖|骨干|部长|干事|名次|等级)/.test(line))
+    || "";
+
+  const documentTitle = nonEmpty(key.title) || lines.find((line) => /荣誉证书|聘书|奖状|证书|CERTIFICATE/i.test(line)) || "";
+  const certificateNumber = nonEmpty(key.certificateNumber)
+    || lines.find((line) => /\b20\d{2}\s+[A-Z]\d{2}\s+\d{4,}\s+\d{2,}\b/i.test(line))
+    || "";
+
   let name = safeCredential.name || "";
   if (!name) {
-    if (/优秀班委/.test(`${rank} ${text}`)) name = "优秀班委荣誉证书";
-    else if (/聘书/.test(`${titleLine} ${text}`) && rank) name = `${rank}聘书`;
-    else if (rank && /荣誉证书|表彰/.test(`${titleLine} ${text}`)) name = `${rank}荣誉证书`;
-    else if (titleLine) name = titleLine.replace(/CERTIFICATE OF HONOR/ig, "").trim() || titleLine;
-    else name = rank || "证书/奖项";
+    if (substantiveName) name = substantiveName;
+    else if (/优秀班委/.test(`${rank} ${text}`)) name = "优秀班委荣誉证书";
+    else if (/聘书/.test(`${documentTitle} ${text}`) && rank) name = `${rank}聘书`;
+    else if (rank && /荣誉证书|表彰/.test(`${documentTitle} ${text}`)) name = `${rank}荣誉证书`;
+    else if (documentTitle && !looksGenericTitle(documentTitle)) name = documentTitle;
+    else name = rank || documentTitle || "证书/奖项";
   }
-  const type = normalizeType(titleLine, `${text} ${rank}`);
+
+  const type = normalizeType(documentTitle, `${text} ${rank} ${substantiveName}`);
   const description = safeCredential.description || [
-    rank ? `证明/表彰内容：${rank}` : "",
-    issuer ? `颁发/聘任单位：${issuer}` : "",
+    substantiveName ? `认证/证明内容：${substantiveName}` : rank ? `证明/表彰内容：${rank}` : "",
+    certificateNumber ? `证书编号：${certificateNumber}` : "",
   ].filter(Boolean).join("；");
+
+  let score = 35;
+  if (name && !looksGenericTitle(name)) score += 12;
+  if (issuer) score += 8;
+  if (date) score += 4;
+  if (rank || substantiveName) score += 8;
+  if (certificateNumber) score += 3;
+  score = Math.min(70, score);
+
+  const tier = score >= 65 ? "有效" : score >= 50 ? "补充" : "信息不足";
+  const level = type === "certificate" && issuer ? "industry" : /上海大学/.test(`${text} ${issuer}`) ? "school" : "unknown";
+  const rationale = [
+    issuer ? `已识别发证/颁发机构：${issuer}。` : "发证/颁发机构仍需人工核对。",
+    substantiveName ? `已识别具体认证/资格：${substantiveName}。` : "证书具体认证内容仍不够明确。",
+    certificateNumber ? "证书编号已识别，可用于后续人工核验。" : "",
+    "结构化模型本轮返回不稳定，当前结果由已转录文字和关键字段安全恢复；请保存前核对。",
+  ].filter(Boolean);
+
   return {
     extracted: { name, issuer, date, rank, description, type },
     assessment: {
-      score: 35,
-      tier: "信息不足",
-      level: /上海大学/.test(`${text} ${issuer}`) ? "school" : "unknown",
-      rationale: ["已从图片转录和关键字段复核中恢复核心字段；结构化判断不够稳定，因此请人工核对后保存。"],
-      whatItProves: rank || name || "该材料可作为相关任职、荣誉或获奖经历的证明。",
+      score,
+      tier,
+      level,
+      rationale,
+      whatItProves: substantiveName
+        ? `证明持证人获得或被认可为“${substantiveName}”；具体能力范围以证书及认证标准为准。`
+        : rank || name || "该材料可作为相关任职、荣誉或获奖经历的证明。",
       followUpQuestion: null,
       needsConfirmation: true,
     },
@@ -132,21 +194,23 @@ Your ONLY job is to read the uploaded credential image and transcribe visible te
 - Keep the natural reading order from top to bottom.
 - Return plain text only, no markdown, no JSON, no commentary.`;
 
-const keyFieldInstructions = `You are doing a SECOND visual verification pass on a Chinese credential image.
+const keyFieldInstructions = `You are doing a SECOND visual verification pass on a multilingual credential image.
 Look at the image itself, not only at the supplied transcription.
 Extract only fields that are directly legible. Never guess obscured or blurry text.
 Return JSON only with exactly these keys:
-{"title":"","issuer":"","date":"","rank":"","role":"","recipient":"","bodyEvidence":"","uncertain":[]}
+{"title":"","credentialName":"","issuer":"","date":"","rank":"","role":"","recipient":"","certificateNumber":"","bodyEvidence":"","uncertain":[]}
 Rules:
-- title: document title or meaningful credential title, e.g. 荣誉证书 / 聘书.
-- issuer: issuing / appointing organization shown by footer, signature or seal.
-- date: visible issuing date.
-- rank: award/rank/honor such as 优秀班委 / 一等奖.
-- role: appointed role if this is a 聘书/任命书.
+- title: generic document title when visible, e.g. CERTIFICATE / 荣誉证书 / 聘书.
+- credentialName: the substantive qualification, certification, award or recognized role. For example, if the document says "IS RECOGNIZED AS A NX CAD Senior Operator", credentialName must be "NX CAD Senior Operator", not "CERTIFICATE".
+- issuer: issuing / appointing organization. For English certificates, preserve names such as "Siemens Digital Industries Software" exactly when visible.
+- date: visible issuing date, preserving the source wording.
+- rank: award rank / certification level when explicitly present.
+- role: appointed or recognized role when explicitly present.
 - recipient: recipient name only when clearly readable.
-- bodyEvidence: one short faithful sentence copied/paraphrased only from visible body text.
+- certificateNumber: certificate / credential number when directly visible.
+- bodyEvidence: one short faithful sentence based only on visible body text.
 - uncertain: names of fields that are not confidently readable.
-Do not infer prestige, award level, or missing characters.`;
+Do not infer prestige, selectivity, award level, or missing characters.`;
 
 const analysisInstructions = `You are CareerVault's professional credential reviewer. You evaluate awards, honors, appointment letters and certificates for resume value, not personal worth.
 Return JSON only. Never invent award level, selectivity, issuer prestige, participant count, rank, or what the candidate did.
@@ -159,7 +223,9 @@ Use only facts directly supported by at least one source. If visualKeyFields and
 Never guess text marked [无法辨认] or a field listed in visualKeyFields.uncertain.
 
 Extract: credential name, issuer/appointing organization, date, rank/role, description and type.
-For 聘书/任命书 use type "other". For 荣誉证书/表彰 use "honor". For competition awards use "competition". Never output Chinese words in the type field.
+The credential name must be the substantive qualification or recognition, not a generic heading such as "CERTIFICATE". For example, "NX CAD Senior Operator" is the credential name when the document says the holder "IS RECOGNIZED AS A NX CAD Senior Operator".
+If a certificate number is directly visible, preserve it in description as "证书编号：..."; never invent one.
+For 聘书/任命书 use type "other". For 荣誉证书/表彰 use "honor". For competition awards use "competition". Professional software/skills certifications use type "certificate". Never output Chinese words in the type field.
 A generic name like “聘书” should be upgraded to a concise factual name only when the role/organization is directly supported, e.g. “上海大学学生会外联部骨干聘书”.
 Do not ask for information already visible. Ask at most one follow-up only when resume value depends on missing evidence.
 Score 0-100 based only on recognition scope, issuer credibility, selectivity/rank, relevance, and concrete accomplishment evidence. Do not award a high score merely because a document exists.
@@ -204,6 +270,33 @@ async function verifyCriticalFields(ai, imageContent, transcription) {
   });
   if (!upstream.ok) return null;
   return tryParseJson(extractOutputText(payload));
+}
+
+async function repairStructuredReview(ai, evidence, malformedOutput) {
+  const { upstream, payload } = await createResponse(ai, {
+    model: ai.model,
+    reasoning: { effort: "low" },
+    instructions: `Repair a CareerVault credential-review JSON object using ONLY the supplied evidence.
+Do not add facts. The original model output may be malformed or incomplete.
+Return exactly:
+{"extracted":{"name":"","issuer":"","date":"","rank":"","description":"","type":"award|certificate|honor|competition|other"},"assessment":{"score":0,"tier":"旗舰|高价值|有效|补充|信息不足","level":"international|national|provincial|city|school|organization|industry|unknown","rationale":[],"whatItProves":"","followUpQuestion":null,"needsConfirmation":false}}
+Use the substantive certification/qualification name instead of a generic word such as CERTIFICATE.
+If a visible certificate number exists, preserve it in description.
+Never invent prestige, selectivity, results, or candidate contribution.`,
+    input: [{
+      role: "user",
+      content: [{
+        type: "input_text",
+        text: JSON.stringify({ evidence, malformedOutput }),
+      }],
+    }],
+    text: { format: { type: "json_object" } },
+    max_output_tokens: 1400,
+    store: false,
+  });
+  if (!upstream.ok) return null;
+  const repaired = tryParseJson(extractOutputText(payload));
+  return repaired?.extracted && repaired?.assessment && typeof repaired.assessment.score === "number" ? repaired : null;
 }
 
 export default async function handler(req, res) {
@@ -276,7 +369,14 @@ export default async function handler(req, res) {
     let parsed = tryParseJson(rawText);
     let fallbackUsed = false;
     if (!parsed?.extracted || !parsed?.assessment || typeof parsed.assessment.score !== "number") {
-      if (transcribedDocument || visualKeyFields) {
+      const repaired = await repairStructuredReview(ai, {
+        credential: safeCredential,
+        transcribedDocument,
+        visualKeyFields,
+      }, rawText);
+      if (repaired) {
+        parsed = repaired;
+      } else if (transcribedDocument || visualKeyFields) {
         parsed = fallbackFromEvidence(transcribedDocument, visualKeyFields, safeCredential);
         fallbackUsed = true;
       } else {

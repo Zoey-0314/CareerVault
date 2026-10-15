@@ -1,4 +1,5 @@
 import type { Experience } from "@/lib/types";
+import { resolveAiEndpoint } from "@/lib/aiEndpoint";
 
 export interface GroundedResumeBullet {
   text: string;
@@ -20,20 +21,8 @@ export interface GroundedResumeDraft {
   warnings: string[];
 }
 
-const DEFAULT_PUBLIC_PROXY = "https://career-vault-sage.vercel.app/api/resume";
-
 function resumeEndpoint(): string | undefined {
-  const configured = process.env.NEXT_PUBLIC_CAREERVAULT_AI_URL?.trim();
-  if (configured) {
-    const base = configured.replace(/\/$/, "");
-    if (/\/api\/(interview|credential|jd|resume)$/.test(base)) return base.replace(/\/api\/(interview|credential|jd|resume)$/, "/api/resume");
-    return `${base}/api/resume`;
-  }
-  if (typeof window !== "undefined") {
-    if (window.location.hostname.endsWith("vercel.app")) return `${window.location.origin}/api/resume`;
-    if (window.location.hostname === "zoey-0314.github.io") return DEFAULT_PUBLIC_PROXY;
-  }
-  return undefined;
+  return resolveAiEndpoint("resume");
 }
 
 async function readError(response: Response): Promise<Error> {

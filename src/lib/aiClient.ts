@@ -2,6 +2,7 @@ import { analyzeInterviewTurn, type InterviewAgentAnalysis } from "@/lib/intervi
 import { assessCredentialLocally } from "@/lib/credentials";
 import { getNextInterviewQuestion, type InterviewQuestion } from "@/lib/interview";
 import type { Credential, CredentialAssessment, Experience } from "@/lib/types";
+import { resolveAiEndpoint } from "@/lib/aiEndpoint";
 
 export type RemoteProvider = "openai" | "deepseek";
 export type AiOperation = "interview" | "credential" | "jd";
@@ -46,7 +47,6 @@ export interface InterviewTurnContext {
   askedQuestions?: string[];
 }
 
-const DEFAULT_PUBLIC_PROXY = "https://career-vault-sage.vercel.app/api/interview";
 const AI_STATUS_EVENT = "careervault:ai-status";
 
 function emitAiStatus(detail: {
@@ -63,21 +63,8 @@ function emitAiStatus(detail: {
   window.dispatchEvent(new CustomEvent(AI_STATUS_EVENT, { detail }));
 }
 
-function configuredProxyUrl(): string | undefined {
-  const configured = process.env.NEXT_PUBLIC_CAREERVAULT_AI_URL?.trim();
-  if (configured) return configured.replace(/\/$/, "");
-  if (typeof window !== "undefined") {
-    if (window.location.hostname.endsWith("vercel.app")) return `${window.location.origin}/api/interview`;
-    if (window.location.hostname === "zoey-0314.github.io") return DEFAULT_PUBLIC_PROXY;
-  }
-  return undefined;
-}
-
 function endpointFor(kind: "interview" | "credential" | "jd"): string | undefined {
-  const base = configuredProxyUrl();
-  if (!base) return undefined;
-  if (/\/api\/(interview|credential|jd)$/.test(base)) return base.replace(/\/api\/(interview|credential|jd)$/, `/api/${kind}`);
-  return `${base}/api/${kind}`;
+  return resolveAiEndpoint(kind);
 }
 
 async function readError(response: Response, fallback: string): Promise<Error> {
@@ -162,11 +149,17 @@ function normalizeCredentialMonth(value: unknown): string {
     const month = parseChineseMonth(chinese[2]);
     if (year && month && month >= 1 && month <= 12) return `${year}-${String(month).padStart(2, "0")}`;
   }
+  const englishMonths: Record<string, string> = {
+    january: "01", february: "02", march: "03", april: "04", may: "05", june: "06",
+    july: "07", august: "08", september: "09", october: "10", november: "11", december: "12",
+  };
+  const english = raw.match(/\b\d{1,2}\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b/i);
+  if (english) return `${english[2]}-${englishMonths[english[1].toLowerCase()]}`;
   return raw;
 }
 
 export function isRemoteAiConfigured(): boolean {
-  return Boolean(configuredProxyUrl());
+  return Boolean(resolveAiEndpoint("interview"));
 }
 
 export async function analyzeInterviewWithProvider(answer: string, experience: Experience, context: InterviewTurnContext = {}): Promise<AiInterviewResponse> {
@@ -220,12 +213,12 @@ export async function analyzeCredentialWithProvider(credential: Credential): Pro
   }
 }
 
-export async function analyzeJdFileWithProvider(fileDataUrl: string, filename: string): Promise<AiJdResponse> {
+export async function analyzeJdFileWithProvider(fileDataUrl: string | string[], filename: string): Promise<AiJdResponse> {
   const url = endpointFor("jd");
   if (!url) throw new Error("当前部署未配置文件识别服务，请直接粘贴 JD 文本。");
   emitAiStatus({ operation: "jd", stage: "start", message: "正在读取岗位文件并提取 JD" });
   try {
-    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileDataUrl, filename }) });
+    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileDataUrls: Array.isArray(fileDataUrl) ? fileDataUrl : [fileDataUrl], filename }) });
     if (!response.ok) throw await readError(response, "JD 文件识别失败");
     const raw = (await response.json()) as Omit<AiJdResponse, "provider"> & { provider?: string };
     if (!raw?.jdText?.trim()) throw new Error("文件中没有识别到可用的岗位职责或任职要求。");

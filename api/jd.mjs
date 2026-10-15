@@ -36,6 +36,13 @@ function makeFileInput(fileDataUrl, filename) {
   return null;
 }
 
+function requestFileInputs(body, filename) {
+  const raw = Array.isArray(body?.fileDataUrls)
+    ? body.fileDataUrls
+    : [body?.fileDataUrl || body?.imageDataUrl].filter(Boolean);
+  return raw.slice(0, 6).map((item) => makeFileInput(item, filename)).filter(Boolean);
+}
+
 const instructions = `You are CareerVault's job-description transcriber.
 Read the uploaded recruitment image and extract ONLY text supported by the uploaded document.
 Preserve the job title, responsibilities, requirements, preferred qualifications, education/experience requirements, tools/skills and other hiring criteria when visible.
@@ -67,15 +74,14 @@ export default async function handler(req, res) {
   catch (error) { return json(res, 500, { error: "invalid_ai_provider", detail: error instanceof Error ? error.message : "AI Provider 配置无效。" }, responseOrigin); }
   if (!ai.apiKey) return json(res, 503, { error: "ai_not_configured", detail: "Vercel 尚未配置可用的 AI_API_KEY。" }, responseOrigin);
 
-  const fileDataUrl = req.body?.fileDataUrl || req.body?.imageDataUrl;
   const filename = req.body?.filename || "job-description";
-  const fileInput = makeFileInput(fileDataUrl, filename);
-  if (!fileInput) return json(res, 400, { error: "file_required", detail: "请上传岗位图片或 PDF。" }, responseOrigin);
-  if (fileInput.kind === "image" && !ai.supportsImages) {
+  const fileInputs = requestFileInputs(req.body, filename);
+  if (!fileInputs.length) return json(res, 400, { error: "file_required", detail: "请上传岗位图片或 PDF。" }, responseOrigin);
+  if (fileInputs.some((item) => item.kind === "image") && !ai.supportsImages) {
     return json(res, 400, { error: "vision_not_supported", detail: `${providerDisplayName(ai.provider)} 当前模型 ${ai.model} 不支持图片输入；DeepSeek 请使用 deepseek-flash。` }, responseOrigin);
   }
-  if (fileInput.kind === "pdf" && !ai.supportsPdfInput) {
-    return json(res, 400, { error: "pdf_not_supported", detail: "DeepSeek Responses API 当前不支持 PDF 文件输入。请先把 JD PDF 转成图片，或直接复制粘贴 JD 文本。" }, responseOrigin);
+  if (fileInputs.some((item) => item.kind === "pdf") && !ai.supportsPdfInput) {
+    return json(res, 400, { error: "pdf_not_supported", detail: "当前 DeepSeek Responses API 不支持直接读取 PDF。CareerVault 网页会先把 JD PDF 转成页面图片后再识别；请从网页上传，或直接复制粘贴 JD 文本。" }, responseOrigin);
   }
 
   try {
@@ -86,8 +92,10 @@ export default async function handler(req, res) {
       input: [{
         role: "user",
         content: [
-          { type: "input_text", text: "请逐项读取上传的岗位/JD文件，只转录其中真实包含的招聘要求。" },
-          fileInput.content,
+          { type: "input_text", text: fileInputs.length > 1
+            ? `下面是同一份岗位/JD文件的 ${fileInputs.length} 个连续页面。请按页面顺序完整读取，只转录其中真实包含的招聘要求；不要因为跨页而重复内容。`
+            : "请逐项读取上传的岗位/JD文件，只转录其中真实包含的招聘要求。" },
+          ...fileInputs.map((item) => item.content),
         ],
       }],
       text: { format: { type: "json_object" } },
@@ -114,7 +122,7 @@ export default async function handler(req, res) {
       roleTitle: parsed.roleTitle || "",
       jdText: parsed.jdText,
       visionUsed: true,
-      inputKind: fileInput.kind,
+      inputKind: fileInputs.some((item) => item.kind === "pdf") ? "pdf" : "image",
     }, responseOrigin);
   } catch (error) {
     return json(res, 502, { error: "upstream_unavailable", provider: ai.provider, detail: error instanceof Error ? error.message : "JD 文件识别服务暂时不可用。", model: ai.model }, responseOrigin);
