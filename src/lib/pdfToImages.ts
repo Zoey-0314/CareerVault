@@ -1,7 +1,7 @@
 "use client";
 
-const MAX_PDF_PAGES = 6;
-const MAX_PAGE_WIDTH = 1800;
+const MAX_PDF_PAGES = 4;
+const MAX_PAGE_WIDTH = 1400;
 
 export async function pdfFileToImageDataUrls(file: File, maxPages = MAX_PDF_PAGES): Promise<string[]> {
   if (typeof window === "undefined") throw new Error("PDF 转图片只能在浏览器中执行。");
@@ -31,7 +31,7 @@ export async function pdfFileToImageDataUrls(file: File, maxPages = MAX_PDF_PAGE
     if (!context) throw new Error("浏览器无法创建 PDF 页面画布。");
 
     await page.render({ canvasContext: context, viewport }).promise;
-    images.push(canvas.toDataURL("image/jpeg", 0.9));
+    images.push(canvas.toDataURL("image/jpeg", 0.82));
     page.cleanup();
   }
 
