@@ -60,7 +60,7 @@ Good follow-up areas include:
 - outcomes and deliverables;
 - numbers that the user can actually verify.
 
-AI-guided experience enrichment requires a configured remote provider. If the provider is unavailable, the product shows an explicit error instead of switching to a local question generator.
+AI-guided experience enrichment requires a configured remote provider. If the provider is unavailable, the product shows an explicit error instead of generating a substitute question flow.
 
 ### 4. Paste job description
 
