@@ -101,7 +101,7 @@ function looksGenericTitle(value) {
   return /^(certificate|certificate of completion|certificate of achievement|证书|荣誉证书|聘书|奖状)$/i.test(String(value || "").trim());
 }
 
-function fallbackFromEvidence(transcription, visualKeyFields, safeCredential) {
+export function fallbackFromEvidence(transcription, visualKeyFields, safeCredential) {
   const text = String(transcription || "").replace(/\[无法辨认\]/g, "").trim();
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const key = visualKeyFields && typeof visualKeyFields === "object" ? visualKeyFields : {};
