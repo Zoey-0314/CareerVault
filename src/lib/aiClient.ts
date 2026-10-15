@@ -47,6 +47,22 @@ export interface InterviewTurnContext {
   askedQuestions?: string[];
 }
 
+const AI_STATUS_EVENT = "careervault:ai-status";
+
+function emitAiStatus(detail: {
+  operation: AiOperation;
+  stage: "start" | "success" | "error" | "local";
+  provider?: RemoteProvider | "local-v1";
+  model?: string;
+  message?: string;
+  visionUsed?: boolean;
+  fallbackUsed?: boolean;
+  inputKind?: "image" | "pdf" | "text";
+}) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AI_STATUS_EVENT, { detail }));
+}
+
 function endpointFor(kind: "interview" | "credential" | "jd"): string | undefined {
   return resolveAiEndpoint(kind);
 }
@@ -143,7 +159,7 @@ function normalizeCredentialMonth(value: unknown): string {
 }
 
 export function isRemoteAiConfigured(): boolean {
-  return Boolean(configuredProxyUrl());
+  return Boolean(resolveAiEndpoint("interview"));
 }
 
 export async function analyzeInterviewWithProvider(answer: string, experience: Experience, context: InterviewTurnContext = {}): Promise<AiInterviewResponse> {
