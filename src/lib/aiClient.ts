@@ -2,6 +2,7 @@ import { analyzeInterviewTurn, type InterviewAgentAnalysis } from "@/lib/intervi
 import { assessCredentialLocally } from "@/lib/credentials";
 import { getNextInterviewQuestion, type InterviewQuestion } from "@/lib/interview";
 import type { Credential, CredentialAssessment, Experience } from "@/lib/types";
+import { resolveAiEndpoint } from "@/lib/aiEndpoint";
 
 export type RemoteProvider = "openai" | "deepseek";
 export type AiOperation = "interview" | "credential" | "jd";
@@ -46,38 +47,8 @@ export interface InterviewTurnContext {
   askedQuestions?: string[];
 }
 
-const DEFAULT_PUBLIC_PROXY = "https://career-vault-sage.vercel.app/api/interview";
-const AI_STATUS_EVENT = "careervault:ai-status";
-
-function emitAiStatus(detail: {
-  operation: AiOperation;
-  stage: "start" | "success" | "error" | "local";
-  provider?: RemoteProvider | "local-v1";
-  model?: string;
-  message?: string;
-  visionUsed?: boolean;
-  fallbackUsed?: boolean;
-  inputKind?: "image" | "pdf" | "text";
-}) {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(AI_STATUS_EVENT, { detail }));
-}
-
-function configuredProxyUrl(): string | undefined {
-  const configured = process.env.NEXT_PUBLIC_CAREERVAULT_AI_URL?.trim();
-  if (configured) return configured.replace(/\/$/, "");
-  if (typeof window !== "undefined") {
-    if (window.location.hostname.endsWith("vercel.app")) return `${window.location.origin}/api/interview`;
-    if (window.location.hostname === "zoey-0314.github.io") return DEFAULT_PUBLIC_PROXY;
-  }
-  return undefined;
-}
-
 function endpointFor(kind: "interview" | "credential" | "jd"): string | undefined {
-  const base = configuredProxyUrl();
-  if (!base) return undefined;
-  if (/\/api\/(interview|credential|jd)$/.test(base)) return base.replace(/\/api\/(interview|credential|jd)$/, `/api/${kind}`);
-  return `${base}/api/${kind}`;
+  return resolveAiEndpoint(kind);
 }
 
 async function readError(response: Response, fallback: string): Promise<Error> {
