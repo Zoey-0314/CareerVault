@@ -151,9 +151,9 @@ Response contains:
 - warnings
 - suggested next goal
 
-The current provider is `local-v1`, a deterministic local analyzer that requires no API key.
+The current runtime is **remote-AI only** and uses the server-side provider adapter. Production currently uses DeepSeek.
 
-A later LLM provider must keep the same contract so the UI, fact storage and resume generation layers do not depend on OpenAI, Claude, Gemini or any other specific model vendor.
+If the provider is unavailable, misconfigured, rate-limited, or returns an invalid payload, the UI reports the failure. CareerVault does not synthesize substitute AI output. The fact-storage layer remains provider-independent.
 
 See `docs/AI_INTERVIEW_CONTRACT.md` for the full contract.
 
@@ -231,16 +231,18 @@ A later release can replace local persistence with an account + database layer w
 
 ## Current AI strategy
 
-The deterministic interview engine and local analyzer are intentionally usable before an external model is connected.
+All AI-labelled behavior is remote-provider only. Browser-side deterministic utilities may still calculate readiness, persistence, or transparent keyword evidence, but they are not presented as AI output and are never used as fallback responses.
 
-A future model adapter should improve:
+The provider is responsible for:
 
 - extracting structured facts from natural-language answers;
-- choosing a more context-aware next question;
+- choosing the next high-value question;
 - understanding JD semantics;
-- rewriting resume bullets with better language.
+- reviewing credentials;
+- rewriting resume bullets with better language;
+- producing interview-preparation prompts.
 
-It must not become the source of truth. Every generated claim still has to trace back to stored user facts.
+The provider must not become the source of truth. Every generated claim still has to trace back to stored user facts.
 
 ## CI
 

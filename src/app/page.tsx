@@ -12,10 +12,10 @@ import { JobWorkspace } from "@/components/JobWorkspace";
 import { ResumePanel } from "@/components/ResumePanel";
 import { analyzeCredentialWithProvider, analyzeInterviewWithProvider, analyzeJdFileWithProvider, isRemoteAiConfigured } from "@/lib/aiClient";
 import { getCloudUser, isCloudConfigured, loadVaultFromCloud, saveVaultToCloud, sendMagicLink, signOutCloud } from "@/lib/cloud";
-import { assessCredentialLocally, credentialLevelLabel, sortCredentials } from "@/lib/credentials";
+import { credentialLevelLabel, sortCredentials } from "@/lib/credentials";
 import { credentialFieldCopy } from "@/lib/credentialFieldCopy";
 import { getExperienceEvidenceStrength, reviewCandidateProfile } from "@/lib/hrRules";
-import { getExperienceReadiness, getNextInterviewQuestion, type InterviewGoal, type InterviewQuestion } from "@/lib/interview";
+import { getExperienceReadiness, type InterviewQuestion } from "@/lib/interview";
 import { applyConfirmedAgentFacts, type ExtractedFact } from "@/lib/interviewAgent";
 import { createEmptyJobTarget } from "@/lib/jobApplication";
 import { matchExperiences } from "@/lib/matching";
@@ -41,7 +41,6 @@ const experienceLabels: Record<ExperienceType, string> = {
   internship: "实习", work: "工作", project: "项目", campus: "校园", competition: "比赛", research: "科研", coursework: "课程设计", volunteer: "志愿",
 };
 const credentialLabels: Record<CredentialType, string> = { award: "奖项", certificate: "证书", honor: "荣誉", competition: "竞赛成绩", other: "其他" };
-const uncertainAnswers = ["不知道", "记不清", "没有统计", "不适用", "暂时没有明确结果", "暂时没有", "其他/不适用"];
 
 function mergeText(existing: string, value: string) {
   const next = value.trim();
@@ -84,10 +83,9 @@ export default function Home() {
   const [draft, setDraft] = useState<Experience>(emptyExperience);
   const [editingExperienceId, setEditingExperienceId] = useState<string | null>(null);
   const [interviewAnswer, setInterviewAnswer] = useState("");
-  const [skippedGoals, setSkippedGoals] = useState<InterviewGoal[]>([]);
   const [pendingFacts, setPendingFacts] = useState<ExtractedFact[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [providerLabel, setProviderLabel] = useState("Local");
+  const [providerLabel, setProviderLabel] = useState("AI · 状态检查中");
   const [remoteInterviewEnabled, setRemoteInterviewEnabled] = useState(false);
   const [agentQuestion, setAgentQuestion] = useState<InterviewQuestion | null>(null);
   const [askedQuestions, setAskedQuestions] = useState<string[]>([]);
@@ -97,7 +95,7 @@ export default function Home() {
   const [credentialDraft, setCredentialDraft] = useState<Credential>(emptyCredential);
   const [editingCredentialId, setEditingCredentialId] = useState<string | null>(null);
   const [credentialAnalyzing, setCredentialAnalyzing] = useState(false);
-  const [credentialProvider, setCredentialProvider] = useState("Local");
+  const [credentialProvider, setCredentialProvider] = useState("AI · 待判断");
   const [credentialNote, setCredentialNote] = useState("");
 
   const [jdImageAnalyzing, setJdImageAnalyzing] = useState(false);
@@ -125,7 +123,7 @@ export default function Home() {
       setJd(targets.find((item) => item.id === activeId)?.jd || state.jd);
       const remote = isRemoteAiConfigured();
       setRemoteInterviewEnabled(remote);
-      setProviderLabel(remote ? "GPT · 待连接" : "Local");
+      setProviderLabel(remote ? "AI · 待连接" : "AI · 未配置");
       if (isCloudConfigured()) {
         const user = await getCloudUser().catch(() => null);
         if (user) { setCloudUserId(user.id); setCloudUserEmail(user.email || "已登录"); }
@@ -147,8 +145,7 @@ export default function Home() {
   const matches = useMemo(() => matchExperiences(jd, experiences), [jd, experiences]);
   const hrReview = useMemo(() => reviewCandidateProfile(profile, experiences), [profile, experiences]);
   const readiness = useMemo(() => getExperienceReadiness(draft), [draft]);
-  const localQuestion = useMemo(() => getNextInterviewQuestion(draft, skippedGoals), [draft, skippedGoals]);
-  const currentQuestion = remoteInterviewEnabled ? agentQuestion : localQuestion;
+  const currentQuestion = agentQuestion;
   const sortedCredentials = useMemo(() => sortCredentials(credentials), [credentials]);
   const credentialCopy = useMemo(() => credentialFieldCopy(credentialDraft.type), [credentialDraft.type]);
   const completion = Math.min(100, Math.round(
@@ -158,7 +155,7 @@ export default function Home() {
 
   function pushConversation(...items: CoachMessage[]) { setConversation((current) => [...current, ...items].slice(-12)); }
   function resetInterviewState() {
-    setInterviewAnswer(""); setSkippedGoals([]); setPendingFacts([]); setAgentQuestion(null); setAskedQuestions([]); setInterviewError("");
+    setInterviewAnswer(""); setPendingFacts([]); setAgentQuestion(null); setAskedQuestions([]); setInterviewError("");
   }
   function resetDraft() {
     setDraft(emptyExperience()); setEditingExperienceId(null); resetInterviewState();
@@ -177,12 +174,17 @@ export default function Home() {
   }
 
   async function requestAiQuestion(experience = draft) {
-    if (!remoteInterviewEnabled || isAnalyzing || !experience.rawDescription.trim()) return;
-    setIsAnalyzing(true); setInterviewError(""); setProviderLabel("GPT · 连接中");
+    if (isAnalyzing || !experience.rawDescription.trim()) return;
+    if (!remoteInterviewEnabled) {
+      const detail = "当前部署未配置 AI 服务，CareerVault 不再使用本地问答兜底。";
+      setInterviewError(detail); setProviderLabel("AI · 未配置");
+      return;
+    }
+    setIsAnalyzing(true); setInterviewError(""); setProviderLabel("AI · 连接中");
     try {
       const result = await analyzeInterviewWithProvider("", experience, { askedQuestions });
       setAgentQuestion(result.analysis.nextQuestion || null);
-      setProviderLabel(`GPT${result.model ? ` · ${result.model}` : ""}`);
+      setProviderLabel(`${result.provider === "deepseek" ? "DeepSeek" : "OpenAI"}${result.model ? ` · ${result.model}` : ""}`);
       if (result.analysis.nextQuestion) {
         pushConversation(message("coach", `我已经读完现有信息。下一步最值得补的是：${result.analysis.nextQuestion.question}`));
       } else {
@@ -190,7 +192,7 @@ export default function Home() {
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : "AI 面试调用失败。";
-      setProviderLabel("GPT · 调用失败"); setInterviewError(detail);
+      setProviderLabel("AI · 调用失败"); setInterviewError(detail);
     } finally { setIsAnalyzing(false); }
   }
 
@@ -199,17 +201,9 @@ export default function Home() {
     const value = answer.trim();
     pushConversation(message("user", value));
 
-    if (!remoteInterviewEnabled) {
-      if (uncertainAnswers.some((item) => value.includes(item))) {
-        setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
-        pushConversation(message("coach", "不知道就不编。我先跳过这一项，继续找能被证明的信息。"));
-        setInterviewAnswer(""); return;
-      }
-    }
-
     setIsAnalyzing(true); setInterviewError("");
     try {
-      const nextAsked = remoteInterviewEnabled ? [...askedQuestions, currentQuestion.question].slice(-12) : askedQuestions;
+      const nextAsked = [...askedQuestions, currentQuestion.question].slice(-12);
       const result = await analyzeInterviewWithProvider(value, draft, {
         previousQuestion: currentQuestion,
         askedQuestions: nextAsked,
@@ -219,13 +213,9 @@ export default function Home() {
       const pending = result.analysis.extractedFacts.filter((fact) => fact.status === "needs_confirmation");
       setPendingFacts(pending);
 
-      if (result.provider === "openai") {
-        setAskedQuestions(nextAsked);
-        setAgentQuestion(result.analysis.nextQuestion || null);
-        setProviderLabel(`GPT${result.model ? ` · ${result.model}` : ""}`);
-      } else {
-        setProviderLabel("Local");
-      }
+      setAskedQuestions(nextAsked);
+      setAgentQuestion(result.analysis.nextQuestion || null);
+      setProviderLabel(`${result.provider === "deepseek" ? "DeepSeek" : "OpenAI"}${result.model ? ` · ${result.model}` : ""}`);
 
       const acknowledgement = result.analysis.acknowledgement || "已读取这轮回答。";
       const warningText = result.analysis.warnings?.length ? ` ${result.analysis.warnings.join(" ")}` : "";
@@ -235,7 +225,7 @@ export default function Home() {
       setInterviewAnswer("");
     } catch (error) {
       const detail = error instanceof Error ? error.message : "AI 面试调用失败。";
-      setProviderLabel("GPT · 调用失败"); setInterviewError(detail);
+      setProviderLabel("AI · 调用失败"); setInterviewError(detail);
       pushConversation(message("coach", `这轮没有写入任何 AI 结果。调用失败：${detail}`));
     } finally { setIsAnalyzing(false); }
   }
@@ -243,17 +233,9 @@ export default function Home() {
   async function submitInterviewAnswer() { await submitInterviewValue(interviewAnswer); }
   async function skipCurrentQuestion() {
     if (!currentQuestion) return;
-    if (remoteInterviewEnabled) {
-      await submitInterviewValue("这个问题我目前不知道、记不清或不适用，请不要重复询问这一项，继续判断下一条最有价值的问题。");
-      return;
-    }
-    setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
+    await submitInterviewValue("这个问题我目前不知道、记不清或不适用，请不要重复询问这一项，继续判断下一条最有价值的问题。");
   }
   function chooseQuickOption(option: string) {
-    if (!remoteInterviewEnabled && uncertainAnswers.some((item) => option.includes(item))) {
-      if (currentQuestion) setSkippedGoals((current) => Array.from(new Set([...current, currentQuestion.goal])));
-      pushConversation(message("user", option), message("coach", "这项没有可靠信息就不写。")); return;
-    }
     setInterviewAnswer((current) => current.trim() ? `${current}；${option}` : option);
   }
   function confirmPendingFact(id: string) {
@@ -276,12 +258,14 @@ export default function Home() {
         assessment: result.assessment,
       };
       setCredentialDraft(next);
-      if (result.provider === "openai" && result.visionUsed) {
+      const providerName = result.provider === "deepseek" ? "DeepSeek" : "OpenAI";
+      if (result.visionUsed) {
         const label = result.inputKind === "pdf" ? "PDF 已读取" : "图片已读取";
-        setCredentialProvider(`GPT · ${label}`); setCredentialNote(`识别成功：服务端已确认读取${result.inputKind === "pdf" ? " PDF" : "图片"}内容。请核对自动回填字段。`);
+        setCredentialProvider(`${providerName} · ${label}`);
+        setCredentialNote(`识别成功：服务端已确认读取${result.inputKind === "pdf" ? " PDF" : "图片"}内容。请核对自动回填字段。`);
       } else {
-        setCredentialProvider(result.provider === "openai" ? `GPT${result.model ? ` · ${result.model}` : ""}` : "Local");
-        setCredentialNote(result.provider === "local-v1" ? "当前只做了本地文本规则判断，没有读取图片或 PDF。" : "");
+        setCredentialProvider(`${providerName}${result.model ? ` · ${result.model}` : ""}`);
+        setCredentialNote("已使用远程 AI 判断当前填写的信息。");
       }
     } catch (error) {
       setCredentialProvider("识别失败"); setCredentialNote(error instanceof Error ? error.message : "奖项/证书文件识别失败。");
@@ -307,7 +291,7 @@ export default function Home() {
     }
   }
   function resetCredentialDraft() {
-    setCredentialDraft(emptyCredential()); setEditingCredentialId(null); setCredentialProvider(isRemoteAiConfigured() ? "GPT" : "Local"); setCredentialNote("");
+    setCredentialDraft(emptyCredential()); setEditingCredentialId(null); setCredentialProvider(isRemoteAiConfigured() ? "AI · 待判断" : "AI · 未配置"); setCredentialNote("");
   }
   function editCredential(item: Credential) {
     setCredentialDraft({ ...item, assessment: item.assessment ? { ...item.assessment, rationale: [...item.assessment.rationale] } : undefined }); setEditingCredentialId(item.id); setCredentialNote("");
@@ -315,7 +299,7 @@ export default function Home() {
   }
   function saveCredential() {
     if (!credentialDraft.name.trim()) return;
-    const assessment = credentialDraft.assessment || assessCredentialLocally(credentialDraft); const saved = { ...credentialDraft, assessment };
+    const saved = { ...credentialDraft };
     if (editingCredentialId) setCredentials((current) => current.map((item) => item.id === editingCredentialId ? { ...saved, id: editingCredentialId } : item));
     else setCredentials((current) => [saved, ...current]);
     resetCredentialDraft();
@@ -400,7 +384,7 @@ export default function Home() {
       const nextJd = result.jdText.trim();
       setJd(nextJd);
       if (activeJobTargetId) changeJobTarget(activeJobTargetId, { jd: nextJd });
-      setProviderLabel(result.model ? `GPT · ${result.model}` : "GPT");
+      setProviderLabel(`${result.provider === "deepseek" ? "DeepSeek" : "OpenAI"}${result.model ? ` · ${result.model}` : ""}`);
       setJdImageNote(`已确认读取 ${sourceLabel}：${file.name}。JD 已保存到当前岗位，不依赖原招聘链接。`);
     } catch (error) {
       setJdImageNote(error instanceof Error ? error.message : "岗位文件识别失败，请改为复制粘贴 JD。");
@@ -413,7 +397,7 @@ export default function Home() {
       const result = parseWorkspaceImport(workspaceImportText); setWorkspaceQuestions(result.questions);
       if (result.questions.length) {
         setDraft(result.experience); setEditingExperienceId(null); resetInterviewState();
-        setConversation([message("coach", `工作区已经提供了大量可验证事实。接下来让 GPT 重新阅读这些事实，只问工作区确实无法判断的高价值问题。`)]);
+        setConversation([message("coach", `工作区已经提供了大量可验证事实。接下来让 AI 重新阅读这些事实，只问工作区确实无法判断的高价值问题。`)]);
       } else { setExperiences((current) => [result.experience, ...current]); setWorkspaceImportText(""); }
     } catch (error) { setWorkspaceQuestions([error instanceof Error ? error.message : "无法识别导入内容，请确认粘贴的是完整 CareerVault JSON。"]); }
   }
@@ -467,7 +451,7 @@ export default function Home() {
     <aside className="rail">
       <div className="brand"><div className="brandIcon"><Layers3 size={18} /></div><div><strong>CareerVault</strong><span>Career memory, refined.</span></div></div>
       <nav className="navList">{nav.map(([key, Icon, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}><Icon size={17} /><span>{label}</span></button>)}</nav>
-      <div className="railFooter"><div className="miniStatus"><ShieldCheck size={15} /><span>Local-first</span></div><p>IndexedDB 自动保存 · 可导出备份</p></div>
+      <div className="railFooter"><div className="miniStatus"><ShieldCheck size={15} /><span>浏览器存储</span></div><p>IndexedDB 自动保存 · 可导出备份</p></div>
     </aside>
 
     <main className="workspace">
@@ -492,16 +476,16 @@ export default function Home() {
       {tab === "profile" && <section className="sectionStack narrow"><div className="sectionIntro"><span className="eyebrow">PERSONAL PROFILE</span><h2>只保留 HR 真正需要的基础信息</h2><p>默认不要求年龄、性别、详细住址、身高等低价值或敏感字段。</p></div><article className="panel formPanel"><div className="formGrid">{([ ["name", "姓名"], ["email", "邮箱"], ["phone", "电话"], ["city", "求职城市"], ["school", "学校"], ["major", "专业"], ["degree", "学历"], ["graduation", "毕业时间"] ] as const).map(([key, label]) => <label key={key}><span>{label}</span><input value={profile[key]} onChange={(e) => setProfile({ ...profile, [key]: e.target.value })} /></label>)}</div></article><article className="panel"><div className="panelHeading"><div><span className="eyebrow">HR SCREENING</span><h3>初筛意见</h3></div></div><div className="reviewList">{hrReview.map((item) => <div className="reviewRow" key={item.title}>{item.type === "pass" ? <CheckCircle2 size={17} /> : <CircleAlert size={17} />}<div><strong>{item.title}</strong><span>{item.detail}</span></div></div>)}</div></article></section>}
 
       {tab === "experiences" && <section className="sectionStack">
-        <div className="sectionIntro"><span className="eyebrow">EXPERIENCE VAULT</span><h2>先说事实，简历语言交给专业 HR 规则。</h2><p>GPT 会先读完已有事实，再决定下一问；不会为了填满固定清单重复追问。</p></div>
-        <article className="panel workspaceImport"><div className="panelHeading"><div><span className="eyebrow">WORKSPACE IMPORT</span><h3>Vibe Coding / AI Coding 项目一键提取</h3><p>让真正看得到仓库和 Git 历史的 AI 帮你整理事实，CareerVault 再让 GPT 判断哪些内容仍值得追问。</p></div><FolderGit2 size={20} /></div><div className="buttonRow"><button className="button primary" onClick={copyWorkspacePrompt}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "已复制" : "复制工作区 Prompt"}</button></div><textarea rows={6} value={workspaceImportText} onChange={(e) => setWorkspaceImportText(e.target.value)} placeholder="把工作区返回的 CAREERVAULT_IMPORT_V1 JSON 粘贴到这里…" /><div className="buttonRow"><button className="button secondary" disabled={!workspaceImportText.trim()} onClick={importWorkspaceResult}><FileJson size={15} />解析并导入</button></div>{workspaceQuestions.length > 0 && <div className="questionNotice"><CircleAlert size={16} /><div><strong>工作区标记的待确认项</strong>{workspaceQuestions.map((q) => <span key={q}>{q}</span>)}</div></div>}</article>
-        <div className="interviewGrid" id="experience-editor"><article className="panel formPanel"><div className="panelHeading"><div><span className="eyebrow">{editingExperienceId ? "EDIT EXPERIENCE" : "NEW EXPERIENCE"}</span><h3>{editingExperienceId ? "修改已有经历" : "经历基础信息"}</h3></div>{editingExperienceId && <button className="iconButton" onClick={resetDraft} aria-label="取消编辑"><X size={16} /></button>}</div><div className="formGrid"><label><span>类型</span><select value={draft.type} onChange={(e) => { setDraft({ ...draft, type: e.target.value as ExperienceType }); resetInterviewState(); }}>{Object.entries(experienceLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>岗位 / 项目</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label><label><span>公司 / 组织</span><input value={draft.organization} onChange={(e) => setDraft({ ...draft, organization: e.target.value })} /></label><label><span>开始</span><input type="month" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} /></label><label><span>结束</span><input type="month" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} /></label></div><label><span>用自己的话说你做了什么</span><textarea rows={5} value={draft.rawDescription} onChange={(e) => { setDraft({ ...draft, rawDescription: e.target.value }); if (agentQuestion) setAgentQuestion(null); }} onBlur={() => { if (remoteInterviewEnabled && draft.rawDescription.trim() && !agentQuestion && !isAnalyzing) void requestAiQuestion(draft); }} /></label><ExperienceStructuredEditor value={draft} onChange={setDraft} open={Boolean(editingExperienceId)} /></article>
+        <div className="sectionIntro"><span className="eyebrow">EXPERIENCE VAULT</span><h2>先说事实，简历语言交给专业 HR 规则。</h2><p>AI 会先读完已有事实，再决定下一问；不会为了填满固定清单重复追问。</p></div>
+        <article className="panel workspaceImport"><div className="panelHeading"><div><span className="eyebrow">WORKSPACE IMPORT</span><h3>Vibe Coding / AI Coding 项目一键提取</h3><p>让真正看得到仓库和 Git 历史的 AI 帮你整理事实，CareerVault 再让 AI 判断哪些内容仍值得追问。</p></div><FolderGit2 size={20} /></div><div className="buttonRow"><button className="button primary" onClick={copyWorkspacePrompt}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "已复制" : "复制工作区 Prompt"}</button></div><textarea rows={6} value={workspaceImportText} onChange={(e) => setWorkspaceImportText(e.target.value)} placeholder="把工作区返回的 CAREERVAULT_IMPORT_V1 JSON 粘贴到这里…" /><div className="buttonRow"><button className="button secondary" disabled={!workspaceImportText.trim()} onClick={importWorkspaceResult}><FileJson size={15} />解析并导入</button></div>{workspaceQuestions.length > 0 && <div className="questionNotice"><CircleAlert size={16} /><div><strong>工作区标记的待确认项</strong>{workspaceQuestions.map((q) => <span key={q}>{q}</span>)}</div></div>}</article>
+        <div className="interviewGrid" id="experience-editor"><article className="panel formPanel"><div className="panelHeading"><div><span className="eyebrow">{editingExperienceId ? "EDIT EXPERIENCE" : "NEW EXPERIENCE"}</span><h3>{editingExperienceId ? "修改已有经历" : "经历基础信息"}</h3></div>{editingExperienceId && <button className="iconButton" onClick={resetDraft} aria-label="取消编辑"><X size={16} /></button>}</div><div className="formGrid"><label><span>类型</span><select value={draft.type} onChange={(e) => { setDraft({ ...draft, type: e.target.value as ExperienceType }); resetInterviewState(); }}>{Object.entries(experienceLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>岗位 / 项目</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></label><label><span>公司 / 组织</span><input value={draft.organization} onChange={(e) => setDraft({ ...draft, organization: e.target.value })} /></label><label><span>开始</span><input type="month" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} /></label><label><span>结束</span><input type="month" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} /></label></div><label><span>用自己的话说你做了什么</span><textarea rows={5} value={draft.rawDescription} onChange={(e) => { setDraft({ ...draft, rawDescription: e.target.value }); if (agentQuestion) setAgentQuestion(null); }} onBlur={() => { if (draft.rawDescription.trim() && !agentQuestion && !isAnalyzing) void requestAiQuestion(draft); }} /></label><ExperienceStructuredEditor value={draft} onChange={setDraft} open={Boolean(editingExperienceId)} /></article>
           <article className="panel coachPanel"><div className="coachTop"><div><span className="coachMark"><BriefcaseBusiness size={16} /></span><div><strong>CareerVault HR Coach</strong><span>{providerLabel} · AI 根据已有事实决定下一问</span></div></div><div className="readiness">{readiness.score}%</div></div><div className="progressTrack"><span style={{ width: `${readiness.score}%` }} /></div><CoachTranscript messages={conversation} />
           {!draft.rawDescription.trim() ? <div className="emptyState">先在左侧写一句最原始的经历描述。</div>
-          : interviewError ? <div className="questionNotice"><CircleAlert size={16} /><div><strong>GPT 调用失败，本轮没有退回固定问答</strong><span>{interviewError}</span><button className="button secondary small" disabled={isAnalyzing} onClick={() => requestAiQuestion()}><RefreshCw size={14} />重试连接并生成下一问</button></div></div>
+          : interviewError ? <div className="questionNotice"><CircleAlert size={16} /><div><strong>AI 调用失败，本轮不会生成替代结果</strong><span>{interviewError}</span><button className="button secondary small" disabled={isAnalyzing} onClick={() => requestAiQuestion()}><RefreshCw size={14} />重试连接并生成下一问</button></div></div>
           : pendingFacts.length ? <div className="pendingList">{pendingFacts.map((fact) => <div className="pendingCard" key={fact.id}><textarea rows={2} value={fact.value} onChange={(e) => setPendingFacts((current) => current.map((item) => item.id === fact.id ? { ...item, value: e.target.value } : item))} /><div className="buttonRow"><button className="button primary small" onClick={() => confirmPendingFact(fact.id)}><Check size={14} />确认</button><button className="button tertiary small" onClick={() => setPendingFacts((current) => current.filter((item) => item.id !== fact.id))}>不保存</button></div></div>)}</div>
-          : isAnalyzing && remoteInterviewEnabled && !currentQuestion ? <div className="questionNotice"><Loader2 className="spin" size={16} /><div><strong>GPT 正在阅读已有经历</strong><span>它会根据已有事实和 HR 规则决定下一问。</span></div></div>
-          : remoteInterviewEnabled && !currentQuestion ? <div className="successState"><Sparkles size={20} /><div><strong>{readiness.score >= 60 ? "当前没有必须继续追问的高价值缺口" : "让 GPT 先阅读现有信息"}</strong><span>{readiness.score >= 60 ? "你可以直接保存；需要时也可以重新让 GPT 检查。" : "它不会直接套固定问题清单。"}</span><button className="button secondary small" onClick={() => requestAiQuestion()}><Sparkles size={14} />{readiness.score >= 60 ? "再检查一次" : "生成下一问"}</button></div></div>
-          : currentQuestion ? <div className="questionBlock"><span className="eyebrow">AI NEXT QUESTION · {currentQuestion.goal}</span><h3>{currentQuestion.question}</h3>{currentQuestion.options.length > 0 && <div className="optionRow">{currentQuestion.options.map((option) => <button key={option} onClick={() => chooseQuickOption(option)}>{option}</button>)}</div>}<textarea rows={3} value={interviewAnswer} onChange={(e) => setInterviewAnswer(e.target.value)} placeholder={currentQuestion.placeholder} /><div className="buttonRow"><button className="button primary" disabled={!interviewAnswer.trim() || isAnalyzing} onClick={submitInterviewAnswer}>{isAnalyzing ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}{isAnalyzing ? "GPT 思考中" : "回答并继续"}</button><button className="button tertiary" disabled={isAnalyzing} onClick={skipCurrentQuestion}>不知道 / 跳过</button></div><p className="whyText">为什么问：{currentQuestion.why}</p></div>
+          : isAnalyzing && !currentQuestion ? <div className="questionNotice"><Loader2 className="spin" size={16} /><div><strong>AI 正在阅读已有经历</strong><span>它会根据已有事实和 HR 规则决定下一问。</span></div></div>
+          : !currentQuestion ? <div className="successState"><Sparkles size={20} /><div><strong>{readiness.score >= 60 ? "当前没有必须继续追问的高价值缺口" : "让 AI 先阅读现有信息"}</strong><span>{readiness.score >= 60 ? "你可以直接保存；需要时也可以重新让 GPT 检查。" : "AI 不可用时会明确报错，不会切换成本地问答。"}</span><button className="button secondary small" onClick={() => requestAiQuestion()}><Sparkles size={14} />{readiness.score >= 60 ? "再检查一次" : "生成下一问"}</button></div></div>
+          : currentQuestion ? <div className="questionBlock"><span className="eyebrow">AI NEXT QUESTION · {currentQuestion.goal}</span><h3>{currentQuestion.question}</h3>{currentQuestion.options.length > 0 && <div className="optionRow">{currentQuestion.options.map((option) => <button key={option} onClick={() => chooseQuickOption(option)}>{option}</button>)}</div>}<textarea rows={3} value={interviewAnswer} onChange={(e) => setInterviewAnswer(e.target.value)} placeholder={currentQuestion.placeholder} /><div className="buttonRow"><button className="button primary" disabled={!interviewAnswer.trim() || isAnalyzing} onClick={submitInterviewAnswer}>{isAnalyzing ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}{isAnalyzing ? "AI 思考中" : "回答并继续"}</button><button className="button tertiary" disabled={isAnalyzing} onClick={skipCurrentQuestion}>不知道 / 跳过</button></div><p className="whyText">为什么问：{currentQuestion.why}</p></div>
           : <div className="successState"><CheckCircle2 size={20} /><div><strong>这段经历已达到可用状态</strong></div></div>}
           <div className="buttonRow"><button className="button primary full" disabled={!draft.title.trim() || !draft.organization.trim() || !draft.rawDescription.trim() || pendingFacts.length > 0} onClick={saveExperience}>{editingExperienceId ? "保存修改" : "保存到经历库"}</button>{editingExperienceId && <button className="button tertiary" onClick={resetDraft}>取消编辑</button>}</div></article></div>
         <div className="libraryHeader"><div><span className="eyebrow">LIBRARY</span><h3>我的经历</h3></div><span>{experiences.length} 条</span></div>{experiences.length === 0 ? <div className="emptyState panel">还没有经历。</div> : <div className="cardGrid">{experiences.map((item) => { const r = getExperienceReadiness(item); return <article className="assetCard" key={item.id}><div className="assetTop"><span className="softTag">{experienceLabels[item.type]}</span><div className="buttonRow"><button className="iconButton" onClick={() => editExperience(item)}><Pencil size={15} /></button><button className="iconButton" onClick={() => setExperiences((current) => current.filter((x) => x.id !== item.id))}><Trash2 size={15} /></button></div></div><h4>{item.title}</h4><span className="metaLine">{item.organization} · {item.startDate || "?"} — {item.endDate || "至今"}</span><p>{item.rawDescription}</p><div className="assetFooter"><span>完整度 {r.score}%</span></div></article>; })}</div>}
@@ -510,7 +494,7 @@ export default function Home() {
       {tab === "credentials" && <section className="sectionStack">
         <div className="sectionIntro"><span className="eyebrow">CREDENTIALS</span><h2>奖项和证书不是越多越好，重要的是它到底证明什么。</h2><p>支持图片与 PDF。只有服务端明确确认读到文件时，界面才会标记为“已读取”。</p></div>
         <div className="splitGrid credentialGrid" id="credential-editor"><article className="panel formPanel"><div className="panelHeading"><div><span className="eyebrow">{editingCredentialId ? "EDIT CREDENTIAL" : "NEW CREDENTIAL"}</span><h3>{editingCredentialId ? "修改已有奖项 / 证书" : "添加奖项 / 证书"}</h3></div>{editingCredentialId && <button className="iconButton" onClick={resetCredentialDraft}><X size={16} /></button>}</div>
-          <div className="uploadZone"><ImagePlus size={22} /><div><strong>{editingCredentialId ? "替换或重新识别文件" : "上传奖状 / 证书"}</strong><span>支持图片或 PDF；视觉识别失败时不会再静默回退成本地评分。</span></div><label className="button secondary fileButton"><Upload size={15} />选择图片 / PDF<input type="file" accept="image/*,application/pdf,.pdf" onChange={(e) => handleCredentialFile(e.target.files?.[0])} /></label></div>
+          <div className="uploadZone"><ImagePlus size={22} /><div><strong>{editingCredentialId ? "替换或重新识别文件" : "上传奖状 / 证书"}</strong><span>支持图片或 PDF；视觉识别失败会直接报错，不生成替代评分。</span></div><label className="button secondary fileButton"><Upload size={15} />选择图片 / PDF<input type="file" accept="image/*,application/pdf,.pdf" onChange={(e) => handleCredentialFile(e.target.files?.[0])} /></label></div>
           {credentialDraft.imageDataUrl && <img className="credentialPreview" src={credentialDraft.imageDataUrl} alt="奖项或证书预览" />}
           {credentialDraft.attachmentType === "application/pdf" && <div className="questionNotice"><FileText size={16} /><div><strong>已选择 PDF</strong><span>{credentialDraft.attachmentName || "credential.pdf"}</span></div></div>}
           {credentialNote && <p className="inlineNote">{credentialNote}</p>}

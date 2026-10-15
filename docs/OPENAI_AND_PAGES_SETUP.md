@@ -1,6 +1,6 @@
-# OpenAI + GitHub Pages setup
+# Remote AI + deployment setup
 
-CareerVault is designed so the public website can live on GitHub Pages without exposing an OpenAI API key.
+CareerVault keeps AI API keys server-side. Browser clients call Vercel serverless API routes; no client-side or GitHub Pages bundle contains the provider key.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Vercel serverless API routes
 OpenAI Responses API
 ```
 
-The public site keeps a local rule-based fallback. If the AI API is unavailable, the core interview and credential workflows remain usable.
+The public site has **no local AI fallback**. If the remote provider is unavailable, CareerVault shows an explicit failure and does not generate substitute interview, credential, JD, resume, or interview-prep results.
 
 ## Current deployment
 
@@ -67,7 +67,7 @@ npm install
 npm run dev
 ```
 
-Without a configured public endpoint, local development falls back to deterministic local rules. To use another proxy locally, add `.env.local` (never commit it):
+Local development also requires a remote AI endpoint. Without one, AI actions are disabled with an explicit configuration error. To use a proxy locally, add `.env.local` (never commit it):
 
 ```text
 NEXT_PUBLIC_CAREERVAULT_AI_URL=https://your-domain.example/api/interview
@@ -83,7 +83,7 @@ Cost-control rules:
 - keep output JSON-only and bounded;
 - do not regenerate facts that are already stored;
 - send compressed credential images;
-- fall back to local mode when remote AI fails;
+- fail explicitly when remote AI fails; never substitute local AI output;
 - add authentication/rate limiting before opening unrestricted AI usage to a large public audience.
 
 ## Security

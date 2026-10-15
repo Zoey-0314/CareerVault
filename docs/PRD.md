@@ -60,7 +60,7 @@ Good follow-up areas include:
 - outcomes and deliverables;
 - numbers that the user can actually verify.
 
-V1 includes a deterministic local question generator so the flow works before a model provider is connected.
+AI-guided experience enrichment requires a configured remote provider. If the provider is unavailable, the product shows an explicit error instead of generating a substitute question flow.
 
 ### 4. Paste job description
 

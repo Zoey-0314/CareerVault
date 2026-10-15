@@ -54,7 +54,7 @@ function normalizeResumeVersion(value: ResumeVersion): ResumeVersion | null {
     selectedExperienceIds: Array.isArray(value.selectedExperienceIds) ? value.selectedExperienceIds : [],
     experienceBullets: Array.isArray(value.experienceBullets) ? value.experienceBullets : [],
     credentialIds: Array.isArray(value.credentialIds) ? value.credentialIds : [],
-    provider: value.provider === "openai" || value.provider === "deepseek" ? value.provider : "deterministic",
+    provider: value.provider === "openai" || value.provider === "deepseek" ? value.provider : "legacy",
     jdSnapshot: typeof value.jdSnapshot === "string" ? value.jdSnapshot : "",
   };
 }

@@ -131,12 +131,16 @@ Expressions such as the following reduce certainty:
 
 The system should preserve this uncertainty rather than manufacture precision.
 
-## V1 provider strategy
+## Provider strategy
 
-The current API endpoint is:
+The current runtime is **remote-AI only**.
 
-`POST /api/ai/interview`
+The interview endpoint is:
 
-V1 uses `local-v1`, a deterministic local analyzer with no API key requirement.
+`POST /api/interview`
 
-Later, a real LLM provider can replace the analyzer while keeping the same request/response contract. The UI and fact storage layer should not depend on a specific model vendor.
+Supported remote providers are selected through the server-side provider adapter. The current production deployment uses DeepSeek.
+
+If the provider is unavailable, misconfigured, rate-limited, or returns an invalid payload, the UI must show an explicit error. CareerVault must not synthesize a substitute interview result when the remote provider fails.
+
+The fact-storage layer remains provider-independent, but every AI-labelled interview result must come from a real remote provider response.

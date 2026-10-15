@@ -3,13 +3,13 @@
 > **Tell your story once. Tailor it for every opportunity.**  
 > **经历认真整理一次，此后围绕真实事实，针对不同岗位选材、改写、投递和准备面试。**
 
-CareerVault 是一个 **local-first 的职业经历资产库 + AI 求职工作台**。
+CareerVault 是一个 **浏览器持久化的职业经历资产库 + 远程 AI 求职工作台**。
 
 它不是从“一份已经写好的简历”开始，而是先保存你真正做过的事情、个人贡献、证据和边界，再把这些事实用于岗位匹配、定制简历、投递版本留档和面试准备。
 
-CareerVault is a **local-first career evidence vault and AI-assisted job application workspace**. It stores defensible career facts first, then uses them to tailor resumes, preserve submitted versions, and prepare for interviews without inventing achievements.
+CareerVault is a **browser-persisted career evidence vault with remote-AI job application workflows**. It stores defensible career facts first, then uses them to tailor resumes, preserve submitted versions, and prepare for interviews without inventing achievements.
 
-**正式入口 / Primary app:** https://career-vault-sage.vercel.app/
+**正式入口 / Primary app:** https://www.career-vault.xyz/
 
 GitHub Pages 仅作为静态镜像。由于浏览器 IndexedDB 按域名隔离，GitHub Pages 与 Vercel 的本地数据不会自动共享。
 
@@ -136,7 +136,7 @@ CareerVault 不给用户一次性扔一整份 STAR 表，而是根据现有事�
 - 模糊内容二次确认；
 - AI 参与边界追问；
 - 面试准备项沉淀；
-- 调用失败时明确报错，不把本地规则伪装成远程 AI。
+- 调用失败时明确报错，不生成替代 AI 结果。
 
 ### 3.4 Vibe Coding / AI Coding 工作区导入
 
@@ -201,7 +201,7 @@ CareerVault 不再只有一个会被覆盖的 JD。
 
 ### 3.7 JD 语义匹配
 
-本地规则先进行快速关键词/证据匹配，AI 定制阶段再进行语义重排，因此不要求经历和 JD 使用完全相同的词。
+透明关键词/证据索引用于解释基础匹配；真正的语义选材和简历改写只由远程 AI 执行，因此不会把规则结果伪装成 AI 结果。
 
 AI 仍只能从经历库中存在的事实进行选材。
 
@@ -269,7 +269,7 @@ Dashboard 不再只统计“填了多少字段”，而是按五个维度判断�
 
 ## 4. 数据存储与隐私
 
-CareerVault 采用 **local-first** 设计。
+CareerVault 的业务数据默认持久化在当前浏览器。AI 能力则只通过远程 Provider 提供。
 
 ### IndexedDB
 
@@ -277,7 +277,7 @@ CareerVault 采用 **local-first** 设计。
 
 证书图片等二进制附件与主 Vault JSON 分开保存到独立的 IndexedDB attachment store，避免几十张图片把主状态记录和普通读写拖得越来越大。
 
-Local-first 的含义是：
+浏览器持久化意味着：
 
 - 不注册账号也可以使用；
 - 关闭浏览器后数据仍保留；
@@ -353,7 +353,7 @@ ALLOWED_ORIGIN=https://your-frontend-domain
 - 服务端上游分钟 / 小时级调用上限；
 - 相同请求短时间去重；
 - 单请求 payload / output token 上限；
-- AI 状态和 fallback 明示；
+- AI Provider、模型和失败状态明确显示；
 - 删除和覆盖类操作保护。
 
 如果面向大量陌生用户公开，仍建议在 Vercel Firewall 或外部持久化限流服务中增加真正的 IP / 用户级跨实例限流。
@@ -406,7 +406,7 @@ CI 会依次执行 TypeScript 检查、Vitest 单元测试和 Production Build�
 
 ## What is CareerVault?
 
-CareerVault is a **local-first career evidence vault and AI-assisted job application workspace**.
+CareerVault is a **browser-persisted career evidence vault with remote-AI job application workflows**.
 
 Most resume tools start from an existing resume. CareerVault starts earlier: it helps you preserve what you actually did, what you personally owned, what evidence exists, and what remains uncertain. Those verified facts can then be reused across multiple job targets without rewriting your history every time.
 
@@ -442,7 +442,7 @@ Interview debrief for the next round
 
 ## Current capabilities
 
-- Local-first personal profile
+- Browser-persisted personal profile
 - Experience V3 structured evidence model
 - Adaptive AI HR follow-up
 - Vibe Coding / AI Coding workspace import
@@ -459,7 +459,7 @@ Interview debrief for the next round
 - JSON backup / restore
 - Optional Supabase cloud sync
 - DeepSeek-first provider adapter with OpenAI-compatible support
-- AI usage safeguards and explicit provider/fallback status
+- AI usage safeguards and explicit provider/failure status
 - Vitest unit tests in CI
 
 ## Data model highlights
