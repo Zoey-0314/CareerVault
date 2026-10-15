@@ -169,7 +169,7 @@ export interface ResumeVersion {
   selectedExperienceIds: string[];
   experienceBullets: ResumeVersionExperience[];
   credentialIds: string[];
-  provider: "deterministic" | "openai" | "deepseek";
+  provider: "legacy" | "openai" | "deepseek";
   model?: string;
   jdSnapshot: string;
 }
