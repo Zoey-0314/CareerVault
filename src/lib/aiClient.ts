@@ -197,12 +197,12 @@ export async function analyzeCredentialWithProvider(credential: Credential): Pro
   }
 }
 
-export async function analyzeJdFileWithProvider(fileDataUrl: string, filename: string): Promise<AiJdResponse> {
+export async function analyzeJdFileWithProvider(fileDataUrl: string | string[], filename: string): Promise<AiJdResponse> {
   const url = endpointFor("jd");
   if (!url) throw new Error("当前部署未配置文件识别服务，请直接粘贴 JD 文本。");
   emitAiStatus({ operation: "jd", stage: "start", message: "正在读取岗位文件并提取 JD" });
   try {
-    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileDataUrl, filename }) });
+    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileDataUrls: Array.isArray(fileDataUrl) ? fileDataUrl : [fileDataUrl], filename }) });
     if (!response.ok) throw await readError(response, "JD 文件识别失败");
     const raw = (await response.json()) as Omit<AiJdResponse, "provider"> & { provider?: string };
     if (!raw?.jdText?.trim()) throw new Error("文件中没有识别到可用的岗位职责或任职要求。");
