@@ -275,7 +275,7 @@ export default async function handler(req, res) {
         return json(res, 502, {
           error: "invalid_model_payload",
           provider: ai.provider,
-          detail: "AI 已读取材料，但结构化判断连续两次未返回有效结果。本次不会使用本地规则生成评分，请重新识别。",
+          detail: "AI 已读取材料，但结构化判断连续两次未返回有效结果。本次不生成替代评分，请重新识别。",
           model: ai.model,
           transcription: transcribedDocument,
           visualKeyFields,
