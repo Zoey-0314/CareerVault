@@ -117,7 +117,7 @@ export function JobWorkspace(props: JobWorkspaceProps) {
         </article>
 
         <article className="panel formPanel">
-          <div className="uploadZone"><ImagePlus size={22} /><div><strong>保存岗位 JD 快照</strong><span>不要只留链接。岗位关闭后链接可能失效，面试前仍应能看到当时的职责和要求。</span></div><label className="button secondary fileButton"><Upload size={15} />{jdImageAnalyzing ? "识别中…" : "上传图片 / PDF"}<input type="file" accept="image/*,application/pdf,.pdf" disabled={jdImageAnalyzing} onChange={(e) => onJdFile(e.target.files?.[0])} /></label></div>
+          <div className="uploadZone"><ImagePlus size={22} /><div><strong>保存岗位 JD 快照</strong><span>图片会直接识别；PDF 会先在浏览器转成页面图片再交给 AI，不依赖模型直接读取 PDF。</span></div><label className="button secondary fileButton"><Upload size={15} />{jdImageAnalyzing ? "识别中…" : "上传图片 / PDF"}<input type="file" data-pdf-client-convert="true" accept="image/*,application/pdf,.pdf" disabled={jdImageAnalyzing} onChange={(e) => onJdFile(e.target.files?.[0])} /></label></div>
           {jdImageAnalyzing && <div className="questionNotice"><Loader2 className="spin" size={16} /><div><strong>正在读取岗位文件</strong><span>完成后会写入当前岗位的 JD 快照。</span></div></div>}
           {jdImageNote && <p className="inlineNote">{jdImageNote}</p>}
           <label><span>JD 原文</span><textarea rows={13} value={active.jd} onChange={(e) => onChangeTarget(active.id, { jd: e.target.value })} placeholder="粘贴岗位职责和任职要求，或上传岗位图片 / PDF" /></label>
