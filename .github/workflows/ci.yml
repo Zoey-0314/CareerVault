@@ -30,5 +30,8 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Validate AI eval fixtures
+        run: npm run eval:ai:validate
+
       - name: Production build
         run: npm run build

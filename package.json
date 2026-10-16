@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval:ai:validate": "node scripts/validate-ai-evals.mjs",
+    "eval:ai:live": "node scripts/run-ai-evals.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
