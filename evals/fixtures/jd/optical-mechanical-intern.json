@@ -1,0 +1,59 @@
+{
+  "id": "jd-optical-mechanical-intern",
+  "kind": "jd",
+  "description": "Mobile screenshot of an optical/mechanical internship JD.",
+  "privacy": "The public fixture stores only the role title and job-text expectations. The original screenshot remains private.",
+  "assetFile": "jd/optical-mechanical-intern.jpg",
+  "expected": {
+    "fields": {
+      "roleTitle": {
+        "value": "光学/机械实习生",
+        "match": "normalized_exact",
+        "weight": 3,
+        "required": true
+      }
+    },
+    "mustContain": [
+      "协助工程师开展光学系统",
+      "显微物镜",
+      "光机结构相关仿真计算",
+      "图纸整理",
+      "公差分析",
+      "零部件选型",
+      "BOM整理",
+      "工装设计",
+      "实验测试",
+      "数据记录与数据分析",
+      "实验报告",
+      "技术规范",
+      "SOP",
+      "产品装调",
+      "测试验证",
+      "技术文献检索",
+      "专利",
+      "本科及以上",
+      "光学工程",
+      "机械设计",
+      "精密仪器",
+      "应用物理",
+      "SolidWorks",
+      "Zemax",
+      "Matlab",
+      "至少6个月",
+      "每周到岗≥3天"
+    ],
+    "forbiddenPatterns": [
+      "薪资",
+      "五险一金",
+      "岗位地点",
+      "硕士优先",
+      "必须熟练掌握Python"
+    ]
+  },
+  "thresholds": {
+    "fieldAccuracy": 1,
+    "contentCoverage": 0.9,
+    "missingRequiredRate": 0,
+    "hallucinationCount": 0
+  }
+}
